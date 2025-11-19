@@ -1,0 +1,115 @@
+Kafka Payload:
+=====================
+message/payload:1
+{
+  "did": "981",
+  "timestamp": "1761559635000",
+  "name": "odometer",
+  "value_type":  "0",
+  "float_value": 101.50,
+  "string_value": "",
+  "int_value":  "0",
+  "eventTime":  "2025-10-27T10:07:15.000Z",
+  "receivedTime": "2025-10-27T10:07:15.875Z"
+},
+message/payload:2
+{
+  "did": "981",
+  "timestamp": "1761559635234",
+  "name": "soc",
+  "value_type":  "1",
+  "float_value": 0,
+  "string_value": "",
+  "int_value":  100,
+  "eventTime":  "2025-10-27T10:07:15.234Z",
+  "receivedTime": "2025-10-27T10:07:16.875Z"
+},
+message/payload:3
+{
+  "did": "981",
+  "timestamp": "1761559636061",
+  "name": "speed",
+  "value_type":  "1",
+  "float_value": 0,
+  "string_value": "",
+  "int_value":  25,
+  "eventTime":  "2025-10-27T10:07:16.061Z",
+  "receivedTime": "2025-10-27T10:07:16.567Z"
+},
+message/payload:4
+{
+  "did": "981",
+  "timestamp": "1761559636985",
+  "name": "ignition_status",
+  "value_type":  "1",
+  "float_value": 0,
+  "string_value": "",
+  "int_value":  1,
+  "eventTime":  "2025-10-27T10:07:16.985Z",
+  "receivedTime": "2025-10-27T10:07:17.324Z"
+}
+,
+message/payload:5
+{
+  "did": "981",
+  "timestamp": "1761559715000",
+  "name": "odometer",
+  "value_type":  "0",
+  "float_value": 102.50,
+  "string_value": "",
+  "int_value":  "0",
+  "eventTime":  "2025-10-27T10:08:35.000Z",
+  "receivedTime": "2025-10-27T10:08:36.263Z"
+},
+message/payload:6
+{
+  "did": "981",
+  "timestamp": "1761559715563",
+  "name": "soc",
+  "value_type":  "1",
+  "float_value": 0,
+  "string_value": "",
+  "int_value":  100,
+  "eventTime":  "2025-10-27T10:08:35.563Z",
+  "receivedTime": "2025-10-27T10:08:36.563Z"
+},
+message/payload:7
+{
+  "did": "981",
+  "timestamp": "1761559716663",
+  "name": "speed",
+  "value_type":  "1",
+  "float_value": 0,
+  "string_value": "",
+  "int_value":  65,
+  "eventTime":  "2025-10-27T10:06:36.663Z",
+  "receivedTime": "2025-10-27T10:08:37.563Z"
+},
+message/payload:8
+{
+  "did": "981",
+  "timestamp": "1761559636985",
+  "name": "ignition_status",
+  "value_type":  "1",
+  "float_value": 0,
+  "string_value": "",
+  "int_value":  1,
+  "eventTime":  "2025-10-27T10:08:36.663Z",
+  "receivedTime": "2025-10-27T10:08:37.563Z"
+}
+
+
+
+MongoDB Output
+====================
+vehicle_last_connected_status:[
+    {
+    "did":"981",
+    "eventTime":"2025-10-27T10:08:36.663Z",
+    "odo":102.50,
+    "soc":100,
+    "speed":25,
+    "ignition":1,
+    "ingestion_time":"2025-10-27T10:08:37.663Z"
+}
+]
