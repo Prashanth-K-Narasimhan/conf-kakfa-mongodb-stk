@@ -17,6 +17,25 @@
     - Interpretation of the signals or events within the source payload.
     - Feel free to contact us in case of any queries.
 
+# Diagram
+
+    Producer (Python) → telemetry (Kafka topic)
+                          │
+                          ▼
+            CREATE STREAM telemetry_stream
+                          │
+                          ▼
+        CREATE STREAM telemetry_raw AS SELECT ...
+                          │
+                          ▼
+      CREATE TABLE vehicle_latest AS SELECT ... GROUP BY did
+
+    Kafka Connect →  
+      telemetry_raw      → MongoDB.telemetry_raw  (history)
+      vehicle_latest     → MongoDB.vehicle_latest (latest state)
+
+# Commands
+
         docker compose down
         docker compose build --no-cache
         docker compose up -d
@@ -45,7 +64,7 @@ telemetry — incoming, raw events (one message per metric reading). Producer wr
 
 ksql will create two derived topics:
 
-telemetry_transformed — a stream that contains flattened/enriched rows (one row per incoming event, possibly with added fields like low_soc or ingest_ts). Useful for sinking raw events to Mongo (audit trail).
+telemetry_raw — a stream that contains flattened/enriched rows (one row per incoming event, possibly with added fields like low_soc or ingest_ts). Useful for sinking raw events to Mongo (audit trail).
 
 vehicle_latest — the backing topic for a TABLE of the latest metrics per did. This is a compacted topic containing one up-to-date row per device (perfect for dashboards, lookups and upserts into Mongo).
 
@@ -53,13 +72,13 @@ How they plug in:
 
 Producer → telemetry (raw)
 
-ksql reads telemetry → writes telemetry_transformed (stream) and updates vehicle_latest (table topic)
+ksql reads telemetry → writes telemetry_raw (stream) and updates vehicle_latest (table topic)
 
-Kafka Connect reads telemetry_transformed or vehicle_latest and writes to MongoDB (choose raw stream for full audit or table for one doc per device)
+Kafka Connect reads telemetry_raw or vehicle_latest and writes to MongoDB (choose raw stream for full audit or table for one doc per device)
 
 
     podman run --rm --network host confluentinc/cp-kafka:7.4.1 kafka-topics --bootstrap-server localhost:29092 --create --topic telemetry --partitions 3 --replication-factor 1
-    podman run --rm --network host confluentinc/cp-kafka:7.4.1 kafka-topics --bootstrap-server localhost:29092 --create --topic telemetry_transformed --partitions 3 --replication-factor 1
+    podman run --rm --network host confluentinc/cp-kafka:7.4.1 kafka-topics --bootstrap-server localhost:29092 --create --topic telemetry_raw --partitions 3 --replication-factor 1
     podman run --rm --network host confluentinc/cp-kafka:7.4.1 kafka-topics --bootstrap-server localhost:29092 --create --topic vehicle_latest --partitions 3 --replication-factor 1 --config cleanup.policy=compact
 
 

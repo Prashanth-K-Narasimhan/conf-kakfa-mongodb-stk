@@ -4,4 +4,4 @@
 SELECT * FROM vehicle_latest WHERE did='981';  -- this is a pull query (only works for TABLEs when key provided)
 
 -- Push query (streaming)
-SELECT * FROM telemetry_transformed EMIT CHANGES LIMIT 10;
+SELECT * FROM telemetry_rawANGES LIMIT 10;

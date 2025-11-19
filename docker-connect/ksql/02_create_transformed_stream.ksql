@@ -1,7 +1,7 @@
 -- 02_create_transformed_stream.ksql
--- Flatten/normalize incoming metrics and write to telemetry_transformed topic
-CREATE STREAM telemetry_transformed WITH (
-  KAFKA_TOPIC='telemetry_transformed',
+-- Flatten/normalize incoming metrics and write to telemetry_raw
+CREATE STREAM telemetry_raw
+  KAFKA_TOPIC='telemetry_raw
   VALUE_FORMAT='JSON'
 ) AS
 SELECT

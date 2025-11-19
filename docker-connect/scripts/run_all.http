@@ -9,12 +9,12 @@ Content-Type: application/json
 
 ###
 
-### 2) Create a transformed stream (flatten/normalize) that writes to telemetry_transformed
+### 2) Create a transformed stream (flatten/normalize) that writes to telemetry_raw
 POST http://localhost:8088/ksql
 Content-Type: application/json
 
 {
-  "ksql": "CREATE STREAM telemetry_transformed WITH ( KAFKA_TOPIC='telemetry_transformed', VALUE_FORMAT='JSON' ) AS SELECT did, timestamp, eventTime, receivedTime, name, CASE WHEN float_value IS NOT NULL THEN float_value ELSE CAST(int_value AS DOUBLE) END AS value, ROWTIME AS ingest_rowtime, CASE WHEN name = 'soc' AND COALESCE(int_value,0) < 40 THEN TRUE ELSE FALSE END AS low_soc_flag FROM telemetry_stream EMIT CHANGES;",
+  "ksql": "CREATE STREAM telemetry_raw WITH ( KAFKA_TOPIC='telemetry_raw', VALUE_FORMAT='JSON' ) AS SELECT did, timestamp, eventTime, receivedTime, name, CASE WHEN float_value IS NOT NULL THEN float_value ELSE CAST(int_value AS DOUBLE) END AS value, ROWTIME AS ingest_rowtime, CASE WHEN name = 'soc' AND COALESCE(int_value,0) < 40 THEN TRUE ELSE FALSE END AS low_soc_flag FROM telemetry_stream EMIT CHANGES;",
   "streamsProperties": {}
 }
 
@@ -36,7 +36,7 @@ POST http://localhost:8088/query
 Content-Type: application/json
 
 {
-  "ksql": "SELECT * FROM telemetry_transformed EMIT CHANGES LIMIT 5;",
+  "ksql": "SELECT * FROM telemetry_raw EMIT CHANGES LIMIT 5;",
   "streamsProperties": {}
 }
 
