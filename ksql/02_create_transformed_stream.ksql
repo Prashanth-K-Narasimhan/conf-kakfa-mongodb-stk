@@ -1,0 +1,18 @@
+-- 02_create_transformed_stream.ksql
+-- Flatten/normalize incoming metrics and write to telemetry_transformed topic
+CREATE STREAM telemetry_transformed WITH (
+  KAFKA_TOPIC='telemetry_transformed',
+  VALUE_FORMAT='JSON'
+) AS
+SELECT
+  did,
+  timestamp,
+  eventTime,
+  receivedTime,
+  name,
+  -- pick the appropriate value column
+  CASE WHEN float_value IS NOT NULL THEN float_value ELSE CAST(int_value AS DOUBLE) END AS value,
+  ROWTIME AS ingest_rowtime,
+  CASE WHEN name = 'soc' AND COALESCE(int_value,0) < 40 THEN TRUE ELSE FALSE END AS low_soc_flag
+FROM telemetry_stream
+EMIT CHANGES;

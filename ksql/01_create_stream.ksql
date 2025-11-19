@@ -1,0 +1,16 @@
+-- 01_create_stream.ksql
+-- Register the raw telemetry stream and set ksql to use the event timestamp field (epoch ms)
+CREATE STREAM telemetry_stream (
+  did VARCHAR,
+  timestamp BIGINT,
+  name VARCHAR,
+  float_value DOUBLE,
+  int_value INTEGER,
+  string_value VARCHAR,
+  eventTime VARCHAR,
+  receivedTime VARCHAR
+) WITH (
+  KAFKA_TOPIC='telemetry',
+  VALUE_FORMAT='JSON',
+  TIMESTAMP='timestamp'
+);
