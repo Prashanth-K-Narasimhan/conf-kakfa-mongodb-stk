@@ -64,21 +64,11 @@ wait_for_tcp() {
 }
 
 background_init() {
-  # run in background so we still exec run at the end
   {
-    # Wait for Kafka broker (use service name 'kafka' from docker-compose)
+    # Wait for Kafka broker
     if wait_for_tcp "kafka" 9092 120; then
       log "Kafka reachable. Running create-topics script."
-      # run create-topics.sh - the script uses docker CLI in original form,
-      # but inside this container we can run kafka-topics directly if present.
-      # Try to use kafka-topics that ships in the image, else use docker approach as fallback.
-      if command -v kafka-topics >/dev/null 2>&1; then
-        # Adjust script to call kafka-topics with bootstrap-server kafka:9092
-        /tmp/create-topics.sh || log "create-topics script failed (exit $?)."
-      else
-        log "kafka-topics binary not found in this image. create-topics.sh may call docker run externally. Attempting to run it anyway."
-        /tmp/create-topics.sh || log "create-topics.sh failed."
-      fi
+      /tmp/create-topics.sh || log "create-topics script failed (exit $?)."
     else
       log "Kafka not reachable - skipping create-topics (will continue)."
     fi
@@ -86,20 +76,31 @@ background_init() {
     # Wait for ksqlDB server and then run ksql files
     if wait_for_tcp "ksqldb-server" 8088 120; then
       log "ksqlDB reachable. Running ksql files via /tmp/run_ksql_files.sh"
-      # run the runner script which posts all .ksql under /ksql
       /tmp/run_ksql_files.sh || log "run_ksql_files.sh failed."
     else
       log "ksqlDB not reachable - skipping run of .ksql files."
     fi
 
-        # After ksql files are applied, create MongoDB sink connectors
+    # WAIT a few seconds for the ksql objects to stabilize
     sleep 5
+
+    # Now create MongoDB collections and indexes (before connectors start)
+    if command -v python3 >/dev/null 2>&1; then
+      log "Creating MongoDB collections and indexes using Python script."
+      python3 /tmp/create-mongo-collections.py || log "create-mongo-collections.py failed."
+    else
+      log "python3 not found in container; skipping MongoDB collection creation. Make sure to create collections manually before connectors run."
+    fi
+
+    # After MongoDB collections exist, create MongoDB sink connectors
+    sleep 2
     log "Creating MongoDB sink connectors..."
 
     CONNECT_URL="http://localhost:8083/connectors"
 
     if [ -f "/tmp/connectors/mongo-sink-vehicle_latest.json" ]; then
       log "Posting mongo-sink-vehicle_latest.json"
+      # allow failures but log them
       curl -s -X POST -H "Content-Type: application/json" \
         --data @/tmp/connectors/mongo-sink-vehicle_latest.json \
         "${CONNECT_URL}" || log "Failed to post vehicle_latest connector"
@@ -116,12 +117,10 @@ background_init() {
       log "mongo-sink-telemetry_raw.json not found under /tmp/connectors/"
     fi
 
-    log "MongoDB connector registration step completed."
-
-
     log "Init tasks finished."
   } &
 }
+
 
 # start background init tasks
 background_init

@@ -43,6 +43,8 @@
         docker compose ps
         docker compose logs -f connect
         docker compose logs -f connect | Select-String "ERROR"
+        docker compose logs kafka | Select-String -Pattern "Exception","FATAL","ERROR" -SimpleMatch
+
         docker network ls
         docker exec -it <container-name> bash
 

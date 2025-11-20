@@ -1,0 +1,5 @@
+-- List values
+SELECT * FROM telemetry_raw EMIT CHANGES LIMIT 10;
+
+-- Check per device
+SELECT * FROM vehicle_latest WHERE did = '981';
