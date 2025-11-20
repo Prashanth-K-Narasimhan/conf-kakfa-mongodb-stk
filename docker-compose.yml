@@ -51,7 +51,7 @@ services:
     depends_on:
       - kafka
     volumes:
-      - ./docker-connect/connect-plugins:/usr/share/confluent-hub-components:ro
+      - ./connect-plugins:/usr/share/confluent-hub-components:rw
     environment:
       CONNECT_BOOTSTRAP_SERVERS: "kafka:9092"
       CONNECT_REST_PORT: 8083

@@ -103,7 +103,7 @@ Watch for lines like:
 
 * `[init] Kafka reachable. Running create-topics script.`
 * `[create-mongo] MongoDB reachable. Proceeding to create collections/indexes.`
-* `Posted mongo-sink-vehicle_latest.json` (or connector posted messages)
+* `Posted mongo-sink-vehicle-latest.json` (or connector posted messages)
 * `Init tasks finished.`
 
 ### H — Confirm stack is healthy

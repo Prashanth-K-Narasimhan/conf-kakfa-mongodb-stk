@@ -1,6 +1,0 @@
-pymongo==4.6.0
-confluent-kafka==2.2.0
-pymongo==4.6.0
-kafka-python==2.0.2
-requests
-tabulate
