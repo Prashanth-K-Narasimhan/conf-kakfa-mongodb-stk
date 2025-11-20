@@ -1,0 +1,27 @@
+{
+  "name": "mongo-sink-vehicle-latest",
+  "config": {
+    "connector.class": "com.mongodb.kafka.connect.MongoSinkConnector",
+    "tasks.max": "1",
+    "topics": "vehicle_latest",
+    "connection.uri": "mongodb://mongodb:27017",
+    "database": "telemetry_db",
+    "collection": "vehicle_latest",
+
+    "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+    "key.converter.schemas.enable": "false",
+
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "false",
+
+    "document.id.strategy": "com.mongodb.kafka.connect.sink.processor.id.strategy.PartialValueStrategy",
+    "document.id.strategy.partial.value.projection.list": "DID",
+    "document.id.strategy.partial.value.projection.type": "AllowList",
+
+    "writemodel.strategy": "com.mongodb.kafka.connect.sink.writemodel.strategy.ReplaceOneBusinessKeyStrategy",
+
+    "delete.on.null.values": "false",
+    "errors.tolerance": "all",
+    "errors.log.enable": "true"
+  }
+}

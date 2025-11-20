@@ -1,16 +1,25 @@
--- 03_create_vehicle_latest_table.ksql
--- Build a materialized TABLE with the latest values per device (did)
-CREATE TABLE vehicle_latest WITH (
-  KAFKA_TOPIC='vehicle_latest',
-  VALUE_FORMAT='JSON'
+CREATE TABLE VEHICLE_LATEST
+WITH (
+    KAFKA_TOPIC='vehicle_latest',
+    PARTITIONS=1,
+    REPLICAS=1,
+    VALUE_FORMAT='JSON'
 ) AS
 SELECT
-  did,
-  LATEST_BY_OFFSET(CASE WHEN name = 'odometer' THEN float_value END) AS odo,
-  LATEST_BY_OFFSET(CASE WHEN name = 'soc' THEN int_value END) AS soc,
-  LATEST_BY_OFFSET(CASE WHEN name = 'speed' THEN int_value END) AS speed,
-  LATEST_BY_OFFSET(CASE WHEN name = 'ignition_status' THEN int_value END) AS ignition,
-  LATEST_BY_OFFSET(MAX(timestamp)) AS last_event_ts
-FROM telemetry_stream
-GROUP BY did
+    DID AS DID,
+    LATEST_BY_OFFSET(
+        CASE WHEN NAME = 'odometer' THEN FLOAT_VALUE END
+    ) AS ODO,
+    LATEST_BY_OFFSET(
+        CASE WHEN NAME = 'soc' THEN INT_VALUE END
+    ) AS SOC,
+    LATEST_BY_OFFSET(
+        CASE WHEN NAME = 'speed' THEN INT_VALUE END
+    ) AS SPEED,
+    LATEST_BY_OFFSET(
+        CASE WHEN NAME = 'ignition_status' THEN INT_VALUE END
+    ) AS IGNITION,
+    LATEST_BY_OFFSET(TIMESTAMP) AS LAST_EVENT_TS
+FROM TELEMETRY_STREAM
+GROUP BY DID
 EMIT CHANGES;

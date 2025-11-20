@@ -1,0 +1,17 @@
+{
+  "name": "mongo-sink-telemetry-raw",
+  "config": {
+    "connector.class": "com.mongodb.kafka.connect.MongoSinkConnector",
+    "tasks.max": "1",
+    "topics": "telemetry_raw",
+    "connection.uri": "mongodb://mongodb:27017",
+    "database": "telemetry_db",
+    "collection": "telemetry_raw",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "false",
+    "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+    "writemodel.strategy": "com.mongodb.kafka.connect.sink.writemodel.strategy.InsertOneDefaultStrategy",
+    "errors.tolerance": "all",
+    "consumer.override.auto.offset.reset": "earliest"
+  }
+}
