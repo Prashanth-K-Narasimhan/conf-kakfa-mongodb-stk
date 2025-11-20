@@ -7,10 +7,15 @@
     "connection.uri": "mongodb://mongodb:27017",
     "database": "telemetry_db",
     "collection": "telemetry_raw",
+
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "false",
+
     "value.converter": "org.apache.kafka.connect.json.JsonConverter",
     "value.converter.schemas.enable": "false",
-    "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+
     "writemodel.strategy": "com.mongodb.kafka.connect.sink.writemodel.strategy.InsertOneDefaultStrategy",
+
     "errors.tolerance": "all",
     "errors.log.enable": "true"
   }
