@@ -7,13 +7,16 @@
     "connection.uri": "mongodb://mongodb:27017",
     "database": "telemetry_db",
     "collection": "vehicle_latest",
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "false",
     "value.converter": "org.apache.kafka.connect.json.JsonConverter",
     "value.converter.schemas.enable": "false",
-    "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+    "document.id.strategy": "com.mongodb.kafka.connect.sink.processor.id.strategy.PartialKeyStrategy",
+    "document.id.strategy.key.projection.list": "DID",
+    "document.id.strategy.key.projection.type": "AllowList",
     "writemodel.strategy": "com.mongodb.kafka.connect.sink.writemodel.strategy.ReplaceOneBusinessKeyStrategy",
-    "document.id.strategy": "com.mongodb.kafka.connect.sink.processor.id.strategy.PartialValueStrategy",
-    "document.id.strategy.partial.value.projection.list": "did",
-    "document.id.strategy.partial.value.projection.type": "AllowList",
-    "errors.tolerance": "all"
+    "delete.on.null.values": "false",
+    "errors.tolerance": "all",
+    "errors.log.enable": "true"
   }
 }

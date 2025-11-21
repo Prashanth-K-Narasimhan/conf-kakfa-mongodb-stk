@@ -6,7 +6,7 @@ WITH (
     VALUE_FORMAT='JSON'
 ) AS
 SELECT
-    DID AS D_ID,
+    DID AS DID,
     LATEST_BY_OFFSET(
         CASE WHEN NAME = 'odometer' THEN FLOAT_VALUE END
     ) AS ODO,
