@@ -1,178 +1,264 @@
-Nice — Windows + Docker Desktop + PowerShell noted. I’ll keep PowerShell-native commands, tips specific to WSL/Windows gotchas, and exactly what to run from your repo root so nothing breaks.
+# Real-Time Telemetry Streaming Pipeline
+*A practical engineering report built from real debugging, real design choices, and real system behavior*
 
-I’ll also include the local path to your current `create_pipeline.py` upload so you can reference it quickly: `/mnt/data/create_pipeline.py`
+## 1. Use Case and Expected Outcome
+The starting point was two raw telemetry JSON samples. Each record represented a single metric emitted by a vehicle device.
 
----
+```json
+{
+  "did": "ABC123",
+  "name": "odometer",
+  "float_value": 12345.6,
+  "eventTime": "2024-10-04T11:22:33Z"
+}
+```
 
-# Before you run anything (quick checklist)
+Odometer arrived alone.  
+SOC arrived alone.  
+Speed, ignition, and everything else arrived in separate events.  
+There was no single event that carried the *state* of the vehicle.
 
-1. Docker Desktop running, backend = WSL2.
-2. You run PowerShell **from the repository root** (where `docker-compose.yml`, `create_pipeline.py`, `connect-plugins/`, `connectors/`, `ksql/` live).
-3. Python available in PATH (run `python --version`). If using a venv activate it first:
+The pipeline needed to produce two parallel outputs:
 
-   ```powershell
-   .\.venv\Scripts\Activate.ps1   # or your venv path
-   ```
-4. Ensure the connector jar is in the host folder mapped by compose. Example expected host folder:
+- A **raw history store** where every telemetry event remains preserved exactly as received.
+- A **latest state store** where each `did` has **one continuously updated document** representing the freshest odometer, SOC, speed, ignition, and timestamp.
 
-   ```
-   .\connect-plugins\mongo-kafka-connect-1.11.2-all.jar
-   ```
+The objective was to make downstream services *not* reconstruct state manually.  
+The system had to be reproducible, clean, and easy to observe end-to-end.
 
-If that’s all good, run the commands below.
+## 2. Tech Stack
+A tightly integrated real-time stack:
 
----
+- **Apache Kafka** for ingestion and log persistence  
+- **ksqlDB** for real-time parsing and state aggregation  
+- **Kafka Connect** for data movement  
+- **MongoDB** as both the audit store and the state store  
+- **Python** for orchestration, automation, and data generation  
+- **Docker** as the execution environment  
 
-# PowerShell commands to bring the stack up and validate (copy-paste)
+The pipeline closely mirrors how real IoT, telematics, and EV platforms operate.
 
-## 1) From repo root: start Docker Compose
+## 3. Design and Approach
+Telemetry arrives as fragments.  
+The pipeline stitches meaning out of those fragments.
 
-If your compose file is at repo root:
+### 3.1 Data Flow Overview
+```
+Raw Telemetry → Kafka → ksqlDB Stream → ksqlDB Table → Kafka Topic → MongoDB
+```
 
-```powershell
+### 3.2 Why Docker
+- Identical environment on any machine  
+- No dependency conflicts  
+- Easy teardown and rebuild  
+- Ideal for interview demonstrations  
+
+### 3.3 Stream Definition
+Raw data needed structure before aggregation.
+
+```sql
+CREATE STREAM vehicle_raw (
+  did VARCHAR,
+  name VARCHAR,
+  float_value DOUBLE,
+  int_value BIGINT,
+  string_value VARCHAR,
+  eventTime VARCHAR
+) WITH (KAFKA_TOPIC='vehicle_raw', VALUE_FORMAT='JSON');
+```
+
+### 3.4 Table Definition
+The table merged all events into a unified state.
+
+```sql
+CREATE TABLE vehicle_latest AS
+SELECT
+  did,
+  LATEST_BY_OFFSET(CASE WHEN name='odometer' THEN float_value END) AS odo,
+  LATEST_BY_OFFSET(CASE WHEN name='soc' THEN int_value END) AS soc,
+  LATEST_BY_OFFSET(CASE WHEN name='speed' THEN int_value END) AS speed,
+  LATEST_BY_OFFSET(CASE WHEN name='ignition_status' THEN int_value END) AS ignition,
+  LATEST_BY_OFFSET(eventTime) AS eventTime
+FROM vehicle_raw
+GROUP BY did;
+```
+
+Each update refined the state of one device.  
+Each metric stayed fresh without overwriting unrelated fields.
+
+## 4. Key Implementation Details
+
+### Explicit Topic Creation
+Avoided auto-create to ensure topic name stability.
+
+### MongoDB Document ID Strategy
+Absolutely crucial.  
+Mapping DID to `_id` guaranteed proper updates.
+
+```json
+"document.id.strategy": "com.mongodb.kafka.connect.sink.processor.id.strategy.PartialValueStrategy",
+"document.id.strategy.partial.value.projection.list": "did",
+"writemodel.strategy": "com.mongodb.kafka.connect.sink.writemodel.strategy.ReplaceOneBusinessKeyStrategy"
+```
+
+### Early Data Injection
+ksqlDB tables do not materialize without data.  
+A temporary Python producer ensured the table formed instantly.
+
+```python
+producer.send("vehicle_raw", sample_event)
+```
+
+## 5. Runbook: Starting the Pipeline
+
+### Step 1: Clone the Repo
+```bash
+git clone https://github.com/.../conf-kafka-mongodb-stk
+cd conf-kafka-mongodb-stk
+```
+
+### Step 2: Build the Connect Image
+```bash
+docker build -t kafka-mongo-connect:latest .
+```
+
+### Step 3: Launch the Stack
+```bash
 docker compose up -d
 ```
 
-If it’s in a subfolder (adjust):
-
-```powershell
-# run from repo root but point to the compose file
-docker compose -f .\docker\docker-compose.yml up -d
+### Step 4: Initialize Everything
+```bash
+python create_pipeline_full_v3.py
 ```
 
-Give the services ~20–40s to initialize.
+This script handles:
+- Topic creation  
+- KSQL stream and table creation  
+- Temporary event generation  
+- Connector registration  
+- Health checks  
 
-## 2) Confirm containers are healthy
+### Step 5: Validate the Flow
 
-```powershell
-docker compose ps
+#### ksqlDB
+```sql
+SELECT * FROM vehicle_latest EMIT CHANGES LIMIT 5;
 ```
 
-Look for `connect`, `ksqldb`, `zookeeper`, `kafka`, `mongo` (names will depend on your compose service names).
-
-## 3) Check the plugin jar is visible inside the Connect container
-
-Find Connect container name (example shows how to extract it):
-
-```powershell
-# find the container id or name for the connect service
-docker compose ps --services
-# then inspect logs or run ls inside connect container:
-docker compose exec connect bash -c "ls -la /usr/share/confluent-hub-components || true"
+#### MongoDB
+```js
+db.vehicle_latest.find().pretty()
+db.raw_events.find().pretty()
 ```
 
-Expected: you should see `mongo-kafka-connect-1.11.2-all.jar` listed.
+Watching the state update in real time is the moment everything clicks.
 
-If it’s missing on the host, ensure the host folder path used in `docker-compose.yml` matches where the jar actually is (host path must be relative to where you run `docker compose`).
+## 6. Troubleshooting (Verbose, Real-world Experience)
 
-## 4) Run the Python create script (host)
+### When Kafka Connect Ignored the Mongo Plugin
+Everything looked correct, yet Connect claimed the plugin didn’t exist.  
+The logs revealed the truth:
 
-From repo root:
-
-```powershell
-python .\create_pipeline.py --replace
+```
+ClassNotFoundException: com.mongodb...
 ```
 
-This will:
+The cause was simple:  
+The JAR was on the host, not inside the container.
 
-* create topics
-* create Mongo collections and validators
-* apply KSQL files from `.\ksql\`
-* register connectors from `.\connectors\`
+Rebuilding the image fixed the entire chain.  
+This moment clarified how Connect isolates plugins and why placement matters.
 
-Watch the output for failures. If connectors fail to register, the script will print the Connect REST response body.
+### When the ksqlDB Table Stayed Empty
+The schema was fine.  
+The SQL was fine.  
+But the table refused to populate.
 
-## 5) Inspect Connect logs if connector registration failed
+The issue was timing.  
+ksqlDB requires real stream data before the table materializes.  
+Once early events were injected before table creation, the table came alive instantly.
 
-```powershell
-docker compose logs connect --tail 200
+### When MongoDB Inserted Instead of Updating
+Without a document ID strategy, MongoDB had no way to decide what to update.  
+It defaulted to inserts.
+
+Using DID as `_id` flipped MongoDB into proper update mode.
+
+### When Networking Broke Everything Silently
+Containers use:
+
+```
+kafka:9092
 ```
 
-Search for ClassNotFound, NoClassDefFoundError, or plugin loading errors. Example useful command:
+Host tools use:
 
-```powershell
-docker compose logs connect --tail 200 | Select-String -Pattern "ClassNotFound|NoClassDefFoundError|ERROR|Exception" -Context 0,3
+```
+localhost:29092
 ```
 
-## 6) Quick smoke tests
+Mixing these leads to:
+- empty tables  
+- stalled consumers  
+- silent ingestion failures  
 
-* Check Kafka topics exist (you must have `kafka-python` installed or use `kafka-topics` cli if available):
+Understanding Docker networking removed an entire category of “ghost bugs.”
 
-```powershell
-python - <<'PY'
-from kafka import KafkaAdminClient
-print(KafkaAdminClient(bootstrap_servers="localhost:29092").list_topics())
-PY
+## 7. Common Errors and Fixes (Explained, Not Listed)
+
+### PowerShell Curl Corrupting JSON
+PowerShell aliases `curl` differently.  
+It silently malformed JSON payloads for connectors.
+
+Switching to:
+
+```
+curl.exe
 ```
 
-* Check KSQL REST is reachable:
+made connector creation work flawlessly.
 
-```powershell
-Invoke-RestMethod -Method Post -Uri "http://localhost:8088/ksql" -Body (@{ksql="SHOW STREAMS;"; streamsProperties=@{}} | ConvertTo-Json) -ContentType "application/json"
+### Forgetting Topic Creation
+With auto-create disabled, forgetting to create topics caused silent write failures.  
+Creating topics explicitly resolved everything.
+
+### Table Created Before Data
+Creating the table too early meant it stayed blank forever.  
+Injecting sample events first fixed this consistently.
+
+### Duplicate MongoDB Documents
+Incorrect write strategies led to endless inserts.  
+Choosing the correct ID mapping solved the entire behavior.
+
+## 8. Final Working State
+Once everything aligned, the pipeline behaved like a compact IoT backend:
+
+- `vehicle_raw` captured every telemetry fragment  
+- `vehicle_latest` emitted a clean, merged, always-updated state  
+- MongoDB stored:
+  - full audit history  
+  - one authoritative document per device  
+
+A final verification:
+
+```sql
+SELECT did, odo, soc, speed, ignition FROM vehicle_latest EMIT CHANGES;
 ```
 
-* Check Connect REST lists connectors:
+MongoDB reflected the exact same truth.  
+Everything moved in real time, cleanly and predictably.
 
-```powershell
-Invoke-RestMethod -Uri "http://localhost:8083/connectors"
-```
+## 9. Lessons Learned
 
-* Check Mongo reachable:
+- Topic discipline prevents unpredictable downstream behavior  
+- ksqlDB tables need early data to form meaningful state  
+- Kafka Connect plugin management is its own skill  
+- Docker networking can silently break ingestion if misunderstood  
+- MongoDB write strategy dictates the entire behavior of state storage  
+- Automation keeps the pipeline consistent and production-friendly  
+- Observing data flow end to end teaches more than theory ever could  
 
-```powershell
-# from PowerShell, using mongo cli if installed:
-# mongo --eval "db.getMongo().getDBNames()"
-# or use Python quick check:
-python - <<'PY'
-from pymongo import MongoClient
-c=MongoClient("mongodb://localhost:27017", serverSelectionTimeoutMS=3000)
-print(c.list_database_names())
-PY
-```
+This pipeline didn’t just work.  
+It clarified how real-time systems *think*, *flow*, and *fail* — and how to design them with intention.
 
-## 7) Run the tests
-
-```powershell
-python .\tests\e2e_test.py
-```
-
-It will produce step-by-step output and exit with code indicating pass/fail.
-
----
-
-# If something fails — the exact outputs I need (paste raw text)
-
-If things fail, copy-paste these outputs (no redaction):
-
-1. `docker compose ps`
-2. `docker compose logs connect --tail 300`
-3. `docker compose logs ksqldb --tail 300`
-4. Output of `python .\create_pipeline.py --replace` (full console)
-5. Output of `python .\tests\e2e_test.py` (full console)
-6. Result of `Invoke-RestMethod -Uri "http://localhost:8083/connectors"` (or the PowerShell output)
-
-That will let me pinpoint the problem immediately.
-
----
-
-# Windows-specific gotchas I’ll watch for
-
-1. **Path separators & compose mount relative path** — when you run `docker compose` from repo root, `./connect-plugins` in compose should map to `.\connect-plugins` on Windows; confirm the compose file uses relative UNIX-style paths (Docker Desktop handles them). If you see permission errors or the jar not appearing, it’s usually because compose was run from a different folder or the path in compose is incorrect relative to the current working directory.
-
-2. **File share permissions** — Docker Desktop needs to be allowed to access the drive. If the mounted host directory is empty inside the container, ensure Docker Desktop has file-sharing access to your drive.
-
-3. **Line endings / executable bits** — shell scripts inside containers may need LF endings. But this only matters if you edit scripts on Windows and then run them inside Linux containers. Python files are fine.
-
-4. **WSL vs Windows host network quirks** — using `localhost:29092` is correct for a host process (PowerShell) to connect to Kafka when Docker publishes that port. If you get connection refused, paste `docker compose ps` and we’ll check listeners.
-
----
-
-# Quick sanity: path to your create script (so you can open it quickly)
-
-`/mnt/data/create_pipeline.py`
-
-(If you want me to auto-generate a PowerShell wrapper that sets the correct env vars and runs the create script and then tails logs, I can paste the full script next. Say “Make PS wrapper” and I’ll output the complete file.)
-
----
-
-Ready when you are — run the steps above in PowerShell and paste any failing outputs here. We’ll go fix the root cause fast.
