@@ -1,7 +1,0 @@
--- 04_pull_queries_or_checks.ksql
--- Quick checks (pull queries or push)
--- Pull query (if table is materialized and you want the current value for a key):
-SELECT * FROM vehicle_latest WHERE did='981';  -- this is a pull query (only works for TABLEs when key provided)
-
--- Push query (streaming)
-SELECT * FROM telemetry_rawANGES LIMIT 10;

@@ -1,127 +1,178 @@
-# podman-kakfa-mongodb-stk
-    This repo boots a local Confluent Kafka + ksqlDB + Kafka Connect + MongoDB stack using Podman.
+Nice — Windows + Docker Desktop + PowerShell noted. I’ll keep PowerShell-native commands, tips specific to WSL/Windows gotchas, and exactly what to run from your repo root so nothing breaks.
 
-# Tech Stack
+I’ll also include the local path to your current `create_pipeline.py` upload so you can reference it quickly: `/mnt/data/create_pipeline.py`
 
-    - Confluent Kafka (using KSQL/KStreams for real-time data aggregation)
-    - MongoDB as the target database for data loading
+---
 
-# Objective
+# Before you run anything (quick checklist)
 
-    Provide a step-by-step explanation of the end-to-end data flow, covering:
+1. Docker Desktop running, backend = WSL2.
+2. You run PowerShell **from the repository root** (where `docker-compose.yml`, `create_pipeline.py`, `connect-plugins/`, `connectors/`, `ksql/` live).
+3. Python available in PATH (run `python --version`). If using a venv activate it first:
 
-    - How the incoming payload is streamed through Kafka.
-    - How the data is aggregated using KSQL or KStreams.
-    - How the processed data is loaded into the target MongoDB database.
-    - Identification of key columns used for grouping and aggregation.
-    - Interpretation of the signals or events within the source payload.
-    - Feel free to contact us in case of any queries.
+   ```powershell
+   .\.venv\Scripts\Activate.ps1   # or your venv path
+   ```
+4. Ensure the connector jar is in the host folder mapped by compose. Example expected host folder:
 
-# Diagram
+   ```
+   .\connect-plugins\mongo-kafka-connect-1.11.2-all.jar
+   ```
 
-    Producer (Python) → telemetry (Kafka topic)
-                          │
-                          ▼
-            CREATE STREAM telemetry_stream
-                          │
-                          ▼
-        CREATE STREAM telemetry_raw AS SELECT ...
-                          │
-                          ▼
-      CREATE TABLE vehicle_latest AS SELECT ... GROUP BY did
+If that’s all good, run the commands below.
 
-    Kafka Connect →  
-      telemetry_raw      → MongoDB.telemetry_raw  (history)
-      vehicle_latest     → MongoDB.vehicle_latest (latest state)
+---
 
-# Commands
+# PowerShell commands to bring the stack up and validate (copy-paste)
 
-        docker compose down
-        docker compose build --no-cache
-        docker compose up -d
-        docker compose down --volumes
-        docker compose ps
-        docker compose logs -f connect
-        docker compose logs -f connect | Select-String "ERROR"
-        docker compose logs kafka | Select-String -Pattern "Exception","FATAL","ERROR" -SimpleMatch
+## 1) From repo root: start Docker Compose
 
-        docker network ls
-        docker exec -it <container-name> bash
+If your compose file is at repo root:
 
-        $jarUrl = "https://repo1.maven.org/maven2/org/mongodb/kafka/mongo-kafka-connect/2.0.1/mongo-kafka-connect-2.0.1.jar"
-        Invoke-WebRequest -Uri $jarUrl -OutFile docker-connect\connect-plugins\mongo-kafka-connect-2.0.1.jar
+```powershell
+docker compose up -d
+```
 
-        # run from your project folder that has docker-compose.yml
-        docker compose up -d
+If it’s in a subfolder (adjust):
 
-        # check running services
-        docker compose ps
+```powershell
+# run from repo root but point to the compose file
+docker compose -f .\docker\docker-compose.yml up -d
+```
 
-        # view container logs
-        docker compose logs -f
+Give the services ~20–40s to initialize.
 
-You have one raw ingest topic:
+## 2) Confirm containers are healthy
 
-telemetry — incoming, raw events (one message per metric reading). Producer writes here.
+```powershell
+docker compose ps
+```
 
-ksql will create two derived topics:
+Look for `connect`, `ksqldb`, `zookeeper`, `kafka`, `mongo` (names will depend on your compose service names).
 
-telemetry_raw — a stream that contains flattened/enriched rows (one row per incoming event, possibly with added fields like low_soc or ingest_ts). Useful for sinking raw events to Mongo (audit trail).
+## 3) Check the plugin jar is visible inside the Connect container
 
-vehicle_latest — the backing topic for a TABLE of the latest metrics per did. This is a compacted topic containing one up-to-date row per device (perfect for dashboards, lookups and upserts into Mongo).
+Find Connect container name (example shows how to extract it):
 
-How they plug in:
+```powershell
+# find the container id or name for the connect service
+docker compose ps --services
+# then inspect logs or run ls inside connect container:
+docker compose exec connect bash -c "ls -la /usr/share/confluent-hub-components || true"
+```
 
-Producer → telemetry (raw)
+Expected: you should see `mongo-kafka-connect-1.11.2-all.jar` listed.
 
-ksql reads telemetry → writes telemetry_raw (stream) and updates vehicle_latest (table topic)
+If it’s missing on the host, ensure the host folder path used in `docker-compose.yml` matches where the jar actually is (host path must be relative to where you run `docker compose`).
 
-Kafka Connect reads telemetry_raw or vehicle_latest and writes to MongoDB (choose raw stream for full audit or table for one doc per device)
+## 4) Run the Python create script (host)
 
+From repo root:
 
-    podman run --rm --network host confluentinc/cp-kafka:7.4.1 kafka-topics --bootstrap-server localhost:29092 --create --topic telemetry --partitions 3 --replication-factor 1
-    podman run --rm --network host confluentinc/cp-kafka:7.4.1 kafka-topics --bootstrap-server localhost:29092 --create --topic telemetry_raw --partitions 3 --replication-factor 1
-    podman run --rm --network host confluentinc/cp-kafka:7.4.1 kafka-topics --bootstrap-server localhost:29092 --create --topic vehicle_latest --partitions 3 --replication-factor 1 --config cleanup.policy=compact
+```powershell
+python .\create_pipeline.py --replace
+```
 
+This will:
 
-EXAMPLES:
+* create topics
+* create Mongo collections and validators
+* apply KSQL files from `.\ksql\`
+* register connectors from `.\connectors\`
 
-Produce messages:
-docker run --rm -it --network host confluentinc/cp-kafka:7.4.1 `
-  kafka-console-producer --bootstrap-server localhost:29092 --topic telemetry
+Watch the output for failures. If connectors fail to register, the script will print the Connect REST response body.
 
+## 5) Inspect Connect logs if connector registration failed
 
-Paste JSON lines.
+```powershell
+docker compose logs connect --tail 200
+```
 
-Consume messages:
-docker run --rm -it --network host confluentinc/cp-kafka:7.4.1 `
-  kafka-console-consumer --bootstrap-server localhost:29092 --topic telemetry --from-beginning
+Search for ClassNotFound, NoClassDefFoundError, or plugin loading errors. Example useful command:
 
-List topics:
-docker run --rm --network host confluentinc/cp-kafka:7.4.1 `
-  kafka-topics --bootstrap-server localhost:29092 --list
+```powershell
+docker compose logs connect --tail 200 | Select-String -Pattern "ClassNotFound|NoClassDefFoundError|ERROR|Exception" -Context 0,3
+```
 
+## 6) Quick smoke tests
 
-run a single tick (one call across all devices)
+* Check Kafka topics exist (you must have `kafka-python` installed or use `kafka-topics` cli if available):
 
-python python-producer\producer_simulator.py --bootstrap localhost:29092 --topic telemetry --num-devices 3 --once
+```powershell
+python - <<'PY'
+from kafka import KafkaAdminClient
+print(KafkaAdminClient(bootstrap_servers="localhost:29092").list_topics())
+PY
+```
 
+* Check KSQL REST is reachable:
 
-run continuous at 1 tick per second
+```powershell
+Invoke-RestMethod -Method Post -Uri "http://localhost:8088/ksql" -Body (@{ksql="SHOW STREAMS;"; streamsProperties=@{}} | ConvertTo-Json) -ContentType "application/json"
+```
 
-python python-producer\producer_simulator.py --num-devices 5 --rate 1.0
+* Check Connect REST lists connectors:
 
+```powershell
+Invoke-RestMethod -Uri "http://localhost:8083/connectors"
+```
 
-run for a fixed duration, e.g., 60 seconds
+* Check Mongo reachable:
 
-python python-producer\producer_simulator.py --num-devices 10 --rate 2.0 --duration 60
+```powershell
+# from PowerShell, using mongo cli if installed:
+# mongo --eval "db.getMongo().getDBNames()"
+# or use Python quick check:
+python - <<'PY'
+from pymongo import MongoClient
+c=MongoClient("mongodb://localhost:27017", serverSelectionTimeoutMS=3000)
+print(c.list_database_names())
+PY
+```
 
+## 7) Run the tests
 
-run for a fixed number of ticks, e.g., 100 ticks
+```powershell
+python .\tests\e2e_test.py
+```
 
-python python-producer\producer_simulator.py --num-devices 3 --count 100 --rate 2.0
+It will produce step-by-step output and exit with code indicating pass/fail.
 
+---
 
-Adjust --miss-rate to simulate sensor dropouts. Lower miss rates mean more metrics per tick.
+# If something fails — the exact outputs I need (paste raw text)
 
+If things fail, copy-paste these outputs (no redaction):
 
+1. `docker compose ps`
+2. `docker compose logs connect --tail 300`
+3. `docker compose logs ksqldb --tail 300`
+4. Output of `python .\create_pipeline.py --replace` (full console)
+5. Output of `python .\tests\e2e_test.py` (full console)
+6. Result of `Invoke-RestMethod -Uri "http://localhost:8083/connectors"` (or the PowerShell output)
+
+That will let me pinpoint the problem immediately.
+
+---
+
+# Windows-specific gotchas I’ll watch for
+
+1. **Path separators & compose mount relative path** — when you run `docker compose` from repo root, `./connect-plugins` in compose should map to `.\connect-plugins` on Windows; confirm the compose file uses relative UNIX-style paths (Docker Desktop handles them). If you see permission errors or the jar not appearing, it’s usually because compose was run from a different folder or the path in compose is incorrect relative to the current working directory.
+
+2. **File share permissions** — Docker Desktop needs to be allowed to access the drive. If the mounted host directory is empty inside the container, ensure Docker Desktop has file-sharing access to your drive.
+
+3. **Line endings / executable bits** — shell scripts inside containers may need LF endings. But this only matters if you edit scripts on Windows and then run them inside Linux containers. Python files are fine.
+
+4. **WSL vs Windows host network quirks** — using `localhost:29092` is correct for a host process (PowerShell) to connect to Kafka when Docker publishes that port. If you get connection refused, paste `docker compose ps` and we’ll check listeners.
+
+---
+
+# Quick sanity: path to your create script (so you can open it quickly)
+
+`/mnt/data/create_pipeline.py`
+
+(If you want me to auto-generate a PowerShell wrapper that sets the correct env vars and runs the create script and then tails logs, I can paste the full script next. Say “Make PS wrapper” and I’ll output the complete file.)
+
+---
+
+Ready when you are — run the steps above in PowerShell and paste any failing outputs here. We’ll go fix the root cause fast.

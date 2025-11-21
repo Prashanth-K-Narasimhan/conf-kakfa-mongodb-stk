@@ -45,13 +45,16 @@ services:
       - "8088:8088"
 
   connect:
-    build: ./docker-connect
-    image: confluentinc/cp-kafka-connect:7.4.11
+    build: .
     restart: unless-stopped
     depends_on:
       - kafka
-    volumes:
-      - ./docker-connect/connect-plugins:/usr/share/confluent-hub-components:ro
+      - mongodb
+    # volumes:
+    #   - ./connect-plugins:/usr/share/confluent-hub-components:rw
+    #   - ./connect-plugins/mongo-kafka-connect-1.9.1-all.jar:/kafka/libs/mongo-kafka-connect-1.9.1-all.jar
+      # optional: a second mount to keep previous behavior if needed
+      # - ./connect-plugins:/connect-plugins:rw
     environment:
       CONNECT_BOOTSTRAP_SERVERS: "kafka:9092"
       CONNECT_REST_PORT: 8083
@@ -63,7 +66,6 @@ services:
       CONNECT_OFFSET_STORAGE_TOPIC: "connect-offsets"
       CONNECT_STATUS_STORAGE_TOPIC: "connect-status"
 
-      # single-node friendly replication factors for internal Connect topics
       CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
       CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
       CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
@@ -74,9 +76,11 @@ services:
       CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
 
       CONFLUENT_METRICS_ENABLE: "false"
+      # Ensure plugin path includes the folder we mounted (do NOT remove /usr/share/java)
       PLUGIN_PATH: "/usr/share/java,/usr/share/confluent-hub-components"
     ports:
       - "8083:8083"
+
 
   mongodb:
     image: mongo:6.0
