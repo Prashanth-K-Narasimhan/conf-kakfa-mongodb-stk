@@ -23,7 +23,7 @@ def wait_for_kafka(timeout=60) -> bool:
 
 def create_kafka_topics(topics: List[Tuple[str, int, int]] = None) -> None:
     if topics is None:
-        topics = [("telemetry", 1, 1), ("telemetry_raw", 1, 1), ("vehicle_latest", 1, 1)]
+        topics = [("telemetry_raw", 1, 1), ("telemetry_normalized", 1, 1), ("vehicle_latest_state", 1, 1)]
     if not wait_for_kafka(timeout=30):
         raise RuntimeError("Kafka not reachable at " + KAFKA_BOOTSTRAP)
     admin = KafkaAdminClient(bootstrap_servers=KAFKA_BOOTSTRAP)
@@ -31,7 +31,8 @@ def create_kafka_topics(topics: List[Tuple[str, int, int]] = None) -> None:
         existing = set(admin.list_topics())
         desired = {}
         for name, partitions, rf in topics:
-            desired[name] = NewTopic(name, num_partitions=partitions, replication_factor=rf)
+            topic_configs = {"cleanup.policy": "compact"} if name == "vehicle_latest_state" else {}
+            desired[name] = NewTopic(name, num_partitions=partitions, replication_factor=rf, topic_configs=topic_configs)
         to_create = [t for name, t in desired.items() if name not in existing]
         if not to_create:
             log("kafka topics already present")

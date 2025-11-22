@@ -1,4 +1,5 @@
-"""
+# Write the updated main_refactored.py with default-once and --continuous flag
+code = r'''"""
 Refactored entrypoint for telemetry-pipeline.
 
 This file splits the long procedural main() into smaller functions to improve
@@ -216,3 +217,8 @@ def main():
 
 if __name__ == "__main__":
     main()
+'''
+with open('./pipeline/main_refactored.py', 'w', encoding='utf-8') as f:
+    f.write(code)
+'./pipeline/main_refactored.py'
+

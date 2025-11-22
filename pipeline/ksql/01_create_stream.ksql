@@ -1,14 +1,17 @@
-CREATE STREAM TELEMETRY_STREAM (
-    DID STRING,
-    TIMESTAMP BIGINT,
-    NAME STRING,
-    VALUE_TYPE STRING,
-    FLOAT_VALUE DOUBLE,
-    STRING_VALUE STRING,
-    INT_VALUE INTEGER,
-    EVENTTIME STRING,
-    RECEIVEDTIME STRING
+-- 01_create_raw_stream.ksql
+-- Reads raw input messages exactly as defined. "I already know the schema of this topic, and I just want ksqlDB to read it."
+
+CREATE STREAM TELEMETRY_RAW (
+  did VARCHAR,
+  timestamp BIGINT,
+  name VARCHAR,
+  value_type VARCHAR,
+  float_value DOUBLE,
+  string_value VARCHAR,
+  int_value VARCHAR,     -- keep as varchar because producer is inconsistent
+  eventTime VARCHAR,
+  receivedTime VARCHAR
 ) WITH (
-    KAFKA_TOPIC='telemetry',
-    VALUE_FORMAT='JSON'
+  KAFKA_TOPIC = 'telemetry_raw',
+  VALUE_FORMAT = 'JSON'
 );

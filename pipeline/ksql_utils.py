@@ -107,3 +107,14 @@ def wait_for_table_materialization(table_name: str, timeout: int = KSQL_TABLE_MA
         except Exception:
             # on exception, return True once KSQL reports table exists
             return True
+
+def ksql_server_url():
+    """
+    Returns the KSQL server URL. This keeps the main orchestrator clean and
+    allows you to override via env variable KSQLDB_URL if needed.
+    """
+    import os
+    return os.environ.get("KSQLDB_URL", "http://localhost:8088")
+
+if __name__ == "__main__":
+    apply_ksql_files()

@@ -1,4 +1,5 @@
-# docker-compose.yml
+# version: "3.8"
+
 services:
   zookeeper:
     image: confluentinc/cp-zookeeper:7.4.1
@@ -32,17 +33,26 @@ services:
       - "9092:9092"
       - "29092:29092"
 
+  # ---------- REPLACED SERVICE: real ksqlDB server ----------
   ksqldb-server:
-    image: confluentinc/cp-ksqldb-server:7.4.1
+    image: confluentinc/ksqldb-server:0.28.2
     restart: unless-stopped
     depends_on:
       - kafka
     environment:
-      KSQL_KSQL_SERVICE_ID: "ksql-service"
+      # internal bootstrap to talk to the kafka broker in the compose network
       KSQL_BOOTSTRAP_SERVERS: "kafka:9092"
-      KSQL_STREAMS_STATE_DIR: "/tmp/kafka-streams"
+      # bind to 0.0.0.0 so the host port mapping can reach it
+      KSQL_LISTENERS: "http://0.0.0.0:8088"
+      # auto-create processing stream/topic for logging/processing (optional)
+      KSQL_KSQL_LOGGING_PROCESSING_STREAM_AUTO_CREATE: "true"
+      KSQL_KSQL_LOGGING_PROCESSING_TOPIC_AUTO_CREATE: "true"
+      # Temporary state directory inside container (persist via volume below)
+      KSQL_STREAMS_STATE_DIR: "/var/lib/ksql/streams"
     ports:
       - "8088:8088"
+    volumes:
+      - ksqldb-state:/var/lib/ksql
 
   connect:
     build: .
@@ -50,11 +60,6 @@ services:
     depends_on:
       - kafka
       - mongodb
-    # volumes:
-    #   - ./connect-plugins:/usr/share/confluent-hub-components:rw
-    #   - ./connect-plugins/mongo-kafka-connect-1.9.1-all.jar:/kafka/libs/mongo-kafka-connect-1.9.1-all.jar
-      # optional: a second mount to keep previous behavior if needed
-      # - ./connect-plugins:/connect-plugins:rw
     environment:
       CONNECT_BOOTSTRAP_SERVERS: "kafka:9092"
       CONNECT_REST_PORT: 8083
@@ -80,7 +85,9 @@ services:
       PLUGIN_PATH: "/usr/share/java,/usr/share/confluent-hub-components"
     ports:
       - "8083:8083"
-
+    # optional: mount plugins if needed (uncomment and adjust)
+    # volumes:
+    #   - ./pipeline/connect-plugins:/usr/share/confluent-hub-components:rw
 
   mongodb:
     image: mongo:6.0
@@ -91,5 +98,18 @@ services:
     volumes:
       - mongo-data:/data/db
 
+  ksqldb-ui:
+    image: deniskrumko/ksqldb-ui:latest
+    restart: unless-stopped
+    depends_on:
+      - ksqldb-server
+    environment:
+      APP_CONFIG: /config.toml
+    volumes:
+      - ./pipeline/ui-config.toml:/config.toml
+    ports:
+      - "8081:8080"
+
 volumes:
   mongo-data:
+  ksqldb-state:

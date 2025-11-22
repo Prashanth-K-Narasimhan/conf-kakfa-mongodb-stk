@@ -60,19 +60,19 @@ Invoke-RestMethod -Method Get -Uri "http://localhost:8083/connectors"
 Connector status:
 
 ```powershell
-Invoke-RestMethod -Method Get -Uri "http://localhost:8083/connectors/mongo-sink-telemetry-raw/status" | ConvertTo-Json -Depth 6
+Invoke-RestMethod -Method Get -Uri "http://localhost:8083/connectors/mongo-sink-telemetry-history/status" | ConvertTo-Json -Depth 6
 ```
 
 Get connector config:
 
 ```powershell
-Invoke-RestMethod -Method Get -Uri "http://localhost:8083/connectors/mongo-sink-telemetry-raw" | ConvertTo-Json -Depth 6
+Invoke-RestMethod -Method Get -Uri "http://localhost:8083/connectors/mongo-sink-telemetry-history" | ConvertTo-Json -Depth 6
 ```
 
 Delete connector:
 
 ```powershell
-Invoke-RestMethod -Method Delete -Uri "http://localhost:8083/connectors/mongo-sink-telemetry-raw"
+Invoke-RestMethod -Method Delete -Uri "http://localhost:8083/connectors/mongo-sink-telemetry-history"
 ```
 
 Create connector:

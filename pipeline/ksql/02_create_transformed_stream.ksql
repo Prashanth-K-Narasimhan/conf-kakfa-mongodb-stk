@@ -1,17 +1,26 @@
-CREATE STREAM TELEMETRY_RAW
+-- 02_create_telemetry_normalized.ksql
+-- Normalized stream built on top of TELEMETRY_RAW.
+-- Keeps the same fields, renames `name` -> sensor_name, preserves eventTime (string),
+-- and injects dbIngestion_time (ROWTIME formatted to ISO).
+CREATE STREAM TELEMETRY_NORMALIZED
 WITH (
-    KAFKA_TOPIC='telemetry_raw',
-    VALUE_FORMAT='JSON'
+  KAFKA_TOPIC = 'telemetry_normalized',
+  VALUE_FORMAT = 'JSON'
 ) AS
 SELECT
-    DID,
-    TIMESTAMP,
-    NAME,
-    VALUE_TYPE,
-    FLOAT_VALUE,
-    STRING_VALUE,
-    INT_VALUE,
-    EVENTTIME,
-    RECEIVEDTIME
-FROM TELEMETRY_STREAM
+  did,
+  name                    AS sensor_name,
+  value_type,
+  float_value,
+  string_value,
+  int_value,              -- preserved as VARCHAR
+  eventTime,              -- preserved as original ISO string
+  receivedTime,
+  TIMESTAMPTOSTRING(
+    ROWTIME,
+    'yyyy-MM-dd''T''HH:mm:ss.SSSX',
+    'UTC'
+  ) AS dbIngestion_time
+FROM TELEMETRY_RAW
+PARTITION BY did
 EMIT CHANGES;

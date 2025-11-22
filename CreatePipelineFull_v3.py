@@ -51,7 +51,7 @@ PRODUCER_RUN_SECONDS = int(os.environ.get("PRODUCER_RUN_SECONDS", "30"))
 PRODUCER_NUM_DEVICES = int(os.environ.get("PRODUCER_NUM_DEVICES", "3"))
 PRODUCER_RATE = float(os.environ.get("PRODUCER_RATE", "1.0"))
 PRODUCER_MISS_RATE = float(os.environ.get("PRODUCER_MISS_RATE", "0.1"))
-PRODUCER_TOPIC = os.environ.get("PRODUCER_TOPIC", "telemetry")
+PRODUCER_TOPIC = os.environ.get("PRODUCER_TOPIC", "telemetry_raw")
 PRODUCER_BOOTSTRAP = os.environ.get("PRODUCER_BOOTSTRAP", KAFKA_BOOTSTRAP)
 
 # KSQL/Connect timeouts
@@ -81,9 +81,10 @@ def create_kafka_topics() -> None:
     try:
         existing = set(admin.list_topics())
         desired = {
-            "telemetry": NewTopic("telemetry", num_partitions=1, replication_factor=1),
+        
             "telemetry_raw": NewTopic("telemetry_raw", num_partitions=1, replication_factor=1),
-            "vehicle_latest": NewTopic("vehicle_latest", num_partitions=1, replication_factor=1),
+            "telemetry_normalized": NewTopic("telemetry_normalized", num_partitions=1, replication_factor=1),
+            "vehicle_latest_state": NewTopic("vehicle_latest_state", num_partitions=1, replication_factor=1),
         }
         to_create = [t for name, t in desired.items() if name not in existing]
         if not to_create:
@@ -123,42 +124,42 @@ LATEST_VALIDATOR = None
 
 def setup_mongo() -> None:
     """
-    Create simple collections if missing. No validators. Ensure a helpful index on telemetry_raw
-    and a unique index on vehicle_latest.did if present (non-fatal).
+    Create simple collections if missing. No validators. Ensure a helpful index on telemetry_normalized
+    and a unique index on vehicle_latest_state.did if present (non-fatal).
     """
     if not wait_for_mongo(timeout=30):
         raise RuntimeError("Mongo not reachable at " + MONGO_URL)
     client = MongoClient(MONGO_URL)
     db = client[DB_NAME]
 
-    # telemetry_raw: create if missing, ensure index for faster queries
-    if "telemetry_raw" not in db.list_collection_names():
-        db.create_collection("telemetry_raw")
-        log("mongo telemetry_raw created (no validator)")
+    # telemetry_normalized: create if missing, ensure index for faster queries
+    if "telemetry_normalized" not in db.list_collection_names():
+        db.create_collection("telemetry_normalized")
+        log("mongo telemetry_normalized created (no validator)")
     else:
-        log("mongo telemetry_raw exists (no validator)")
+        log("mongo telemetry_normalized exists (no validator)")
 
     try:
         # non-unique compound index on did + timestamp for efficient queries
-        db.telemetry_raw.create_index([("DID", 1), ("TIMESTAMP", 1)])
-        log("mongo telemetry_raw index ensured")
+        db.telemetry_normalized.create_index([("DID", 1), ("TIMESTAMP", 1)])
+        log("mongo telemetry_normalized index ensured")
     except Exception as e:
-        log("mongo telemetry_raw index non-fatal:", e)
+        log("mongo telemetry_normalized index non-fatal:", e)
 
-    # vehicle_latest: create if missing (will be upserted by connector)
-    if "vehicle_latest" not in db.list_collection_names():
-        db.create_collection("vehicle_latest")
-        log("mongo vehicle_latest created (no validator)")
+    # vehicle_latest_state: create if missing (will be upserted by connector)
+    if "vehicle_latest_state" not in db.list_collection_names():
+        db.create_collection("vehicle_latest_state")
+        log("mongo vehicle_latest_state created (no validator)")
     else:
-        log("mongo vehicle_latest exists (no validator)")
+        log("mongo vehicle_latest_state exists (no validator)")
 
     try:
         # If you later want uniqueness by DID inside document, you can create unique index.
         # For now, create a simple index on _id is automatic. Try create optional index on 'DID' if present.
-        db.vehicle_latest.create_index([("DID", 1)], name="idx_vehicle_latest_DID", unique=False)
-        log("mongo vehicle_latest index ensured (non-unique)")
+        db.vehicle_latest.create_index([("DID", 1)], name="idx_vehicle_latest_state_DID", unique=False)
+        log("mongo vehicle_latest_state index ensured (non-unique)")
     except Exception as e:
-        log("mongo vehicle_latest index non-fatal:", e)
+        log("mongo vehicle_latest_state index non-fatal:", e)
 
     client.close()
 
@@ -399,7 +400,7 @@ def background_producer_corrected(stop_event: threading.Event,
         log("producer thread exiting")
 
 # ---------------- KSQL streaming sample ----------------
-def ksql_stream_sample(limit: int = 5, stream_name: str = "TELEMETRY_RAW") -> None:
+def ksql_stream_sample(limit: int = 5, stream_name: str = "TELEMETRY_NORMALIZED") -> None:
     """Run a short push query and print rows. Requires producers to be active."""
     sql = f"SELECT * FROM {stream_name} EMIT CHANGES LIMIT {limit};"
     url = KSQL_URL.rstrip("/") + "/query-stream"
@@ -472,8 +473,8 @@ def mongo_stats() -> Tuple[int, int]:
     try:
         client = MongoClient(MONGO_URL)
         db = client[DB_NAME]
-        raw_count = db.telemetry_raw.estimated_document_count()
-        latest_count = db.vehicle_latest.estimated_document_count()
+        raw_count = db.telemetry_normalized.estimated_document_count()
+        latest_count = db.vehicle_latest_state.estimated_document_count()
         client.close()
         return raw_count, latest_count
     except Exception as e:
@@ -507,14 +508,14 @@ def main():
     # Apply KSQL objects
     apply_ksql_files(replace=args.replace)
 
-    # Wait for table materialization (vehicle_latest)
-    materialized = wait_for_table_materialization("vehicle_latest", timeout=KSQL_TABLE_MATERIALIZE_TIMEOUT)
+    # Wait for table materialization (vehicle_latest_state)
+    materialized = wait_for_table_materialization("vehicle_latest_state", timeout=KSQL_TABLE_MATERIALIZE_TIMEOUT)
     if not materialized:
-        log("WARNING: vehicle_latest did not materialize within timeout")
+        log("WARNING: vehicle_latest_state did not materialize within timeout")
 
     # While producer still running, sample the transformed stream
-    log("sampling TELEMETRY_RAW stream while producer is active")
-    ksql_stream_sample(limit=5, stream_name="TELEMETRY_RAW")
+    log("sampling TELEMETRY_NORMALIZED stream while producer is active")
+    ksql_stream_sample(limit=5, stream_name="TELEMETRY_NORMALIZED")
 
     # Stop the producer
     if producer_thread.is_alive():
@@ -527,7 +528,7 @@ def main():
 
     # Print quick Mongo stats
     raw_count, latest_count = mongo_stats()
-    log(f"mongo telemetry_raw_count={raw_count}, vehicle_latest_count={latest_count}")
+    log(f"mongo telemetry_normalized_count={raw_count}, vehicle_latest_state_count={latest_count}")
 
     log("pipeline create complete")
 

@@ -32,11 +32,11 @@ MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
 DB_NAME = os.environ.get("DB_NAME", "telemetry_db")
 
 # resources names (change if you used different names)
-TOPICS = ["telemetry", "telemetry_raw", "vehicle_latest"]
-KSQL_STREAMS = ["TELEMETRY_STREAM", "TELEMETRY_RAW"]
-KSQL_TABLES = ["VEHICLE_LATEST"]
-CONNECTOR_NAMES = ["mongo-sink-vehicle-latest", "mongo-sink-telemetry-raw"]
-MONGO_COLLECTIONS = ["telemetry_raw", "vehicle_latest"]
+TOPICS = ["telemetry_raw", "telemetry_normalized", "vehicle_latest_state"]
+KSQL_STREAMS = ["TELEMETRY_RAW", "TELEMETRY_NORMALIZED"]
+KSQL_TABLES = ["VEHICLE_LATEST_STATE"]
+CONNECTOR_NAMES = ["mongo-sink-vehicle-latest-state", "mongo-sink-telemetry-history"]
+MONGO_COLLECTIONS = ["mongo_telemetry_history", "mongo_vehicle_latest_state"]
 
 def ksql_endpoint(path="/ksql"):
     return KSQL_URL.rstrip("/") + path

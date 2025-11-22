@@ -18,11 +18,11 @@ CONNECT_URL = os.environ.get("CONNECT_URL", "http://localhost:8083/connectors")
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
 DB_NAME = os.environ.get("DB_NAME", "telemetry_db")
 
-EXPECTED_TOPICS = ["telemetry", "telemetry_raw", "vehicle_latest"]
-EXPECTED_STREAMS = ["TELEMETRY_STREAM"]  # KSQL returns uppercase names
-EXPECTED_TABLES = ["VEHICLE_LATEST"]
-EXPECTED_COLLECTIONS = ["telemetry_raw", "vehicle_latest"]
-EXPECTED_CONNECTORS = ["mongo-sink-vehicle-latest", "mongo-sink-telemetry-raw"]  # adjust to your filenames
+EXPECTED_TOPICS = ["telemetry_raw", "telemetry_normalized", "vehicle_latest_state"]
+EXPECTED_STREAMS = ["TELEMETRY_RAW", "TELEMETRY_NORMALIZED"]  # KSQL returns uppercase names
+EXPECTED_TABLES = ["VEHICLE_LATEST_STATE"]
+EXPECTED_COLLECTIONS = ["telemetry_history", "vehicle_latest"]
+EXPECTED_CONNECTORS = ["mongo-sink-vehicle-latest", "mongo-sink-telemetry-history"]  # adjust to your filenames
 
 def check_kafka_topics():
     try:

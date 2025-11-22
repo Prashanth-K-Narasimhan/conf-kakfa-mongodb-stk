@@ -16,7 +16,7 @@ PRODUCER_RUN_SECONDS = int(os.environ.get("PRODUCER_RUN_SECONDS", "30"))
 PRODUCER_NUM_DEVICES = int(os.environ.get("PRODUCER_NUM_DEVICES", "3"))
 PRODUCER_RATE = float(os.environ.get("PRODUCER_RATE", "1.0"))
 PRODUCER_MISS_RATE = float(os.environ.get("PRODUCER_MISS_RATE", "0.1"))
-PRODUCER_TOPIC = os.environ.get("PRODUCER_TOPIC", "telemetry")
+PRODUCER_TOPIC = os.environ.get("PRODUCER_TOPIC", "telemetry_raw")
 PRODUCER_BOOTSTRAP = os.environ.get("PRODUCER_BOOTSTRAP", KAFKA_BOOTSTRAP)
 
 KSQL_TABLE_MATERIALIZE_TIMEOUT = int(os.environ.get("KSQL_TABLE_MATERIALIZE_TIMEOUT", "90"))

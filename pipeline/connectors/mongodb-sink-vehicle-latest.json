@@ -1,12 +1,12 @@
 {
-  "name": "mongo-sink-vehicle-latest",
+  "name": "mongo-sink-vehicle-latest_state",
   "config": {
     "connector.class": "com.mongodb.kafka.connect.MongoSinkConnector",
     "tasks.max": "1",
-    "topics": "vehicle_latest",
+    "topics": "vehicle_latest_state",
     "connection.uri": "mongodb://mongodb:27017",
     "database": "telemetry_db",
-    "collection": "vehicle_latest",
+    "collection": "mongo_vehicle_latest_state",
 
     "key.converter": "org.apache.kafka.connect.json.JsonConverter",
     "key.converter.schemas.enable": "false",
