@@ -1,6 +1,6 @@
-pymongo==4.6.0
+# Requirements for the project
 confluent-kafka==2.2.0
-pymongo==4.6.0
-kafka-python==2.0.2
-requests==2.31.0
+kafka-python>=2.0.2
+pymongo>=4.0
+requests>=2.28.0
 tabulate
