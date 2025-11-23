@@ -15,79 +15,73 @@ services:
     restart: unless-stopped
     depends_on:
       - zookeeper
+    ports:
+      - "9092:9092"
+      - "29092:29092"
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: "zookeeper:2181"
+      # Expose 9092 for internal container traffic, 29092 for host machine
       KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29092
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-
+      
+      # Prevent auto-creation to ensure pipeline creates topics with correct specs
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
-
+      
+      # Single-node settings
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_OFFSETS_TOPIC_NUM_PARTITIONS: 1
-    ports:
-      - "9092:9092"
-      - "29092:29092"
 
-  # ---------- REPLACED SERVICE: real ksqlDB server ----------
   ksqldb-server:
     image: confluentinc/ksqldb-server:0.28.2
     restart: unless-stopped
     depends_on:
       - kafka
-    environment:
-      # internal bootstrap to talk to the kafka broker in the compose network
-      KSQL_BOOTSTRAP_SERVERS: "kafka:9092"
-      # bind to 0.0.0.0 so the host port mapping can reach it
-      KSQL_LISTENERS: "http://0.0.0.0:8088"
-      # auto-create processing stream/topic for logging/processing (optional)
-      KSQL_KSQL_LOGGING_PROCESSING_STREAM_AUTO_CREATE: "true"
-      KSQL_KSQL_LOGGING_PROCESSING_TOPIC_AUTO_CREATE: "true"
-      # Temporary state directory inside container (persist via volume below)
-      KSQL_STREAMS_STATE_DIR: "/var/lib/ksql/streams"
     ports:
       - "8088:8088"
+    environment:
+      KSQL_BOOTSTRAP_SERVERS: "kafka:9092"
+      KSQL_LISTENERS: "http://0.0.0.0:8088"
+      KSQL_KSQL_LOGGING_PROCESSING_STREAM_AUTO_CREATE: "true"
+      KSQL_KSQL_LOGGING_PROCESSING_TOPIC_AUTO_CREATE: "true"
+      KSQL_STREAMS_STATE_DIR: "/var/lib/ksql/streams"
     volumes:
       - ksqldb-state:/var/lib/ksql
 
   connect:
-    build: .
+    build: . 
     restart: unless-stopped
     depends_on:
       - kafka
       - mongodb
+    ports:
+      - "8083:8083"
     environment:
       CONNECT_BOOTSTRAP_SERVERS: "kafka:9092"
       CONNECT_REST_PORT: 8083
       CONNECT_REST_ADVERTISED_HOST_NAME: "connect"
-      CONNECT_REST_ADVERTISED_PORT: "8083"
-
       CONNECT_GROUP_ID: "connect-cluster"
+      
+      # Internal topics
       CONNECT_CONFIG_STORAGE_TOPIC: "connect-configs"
       CONNECT_OFFSET_STORAGE_TOPIC: "connect-offsets"
       CONNECT_STATUS_STORAGE_TOPIC: "connect-status"
-
       CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
       CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
       CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
-
+      
+      # JSON (no schema registry used here)
       CONNECT_KEY_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
       CONNECT_VALUE_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
       CONNECT_KEY_CONVERTER_SCHEMAS_ENABLE: "false"
       CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
-
+      
       CONFLUENT_METRICS_ENABLE: "false"
-      # Ensure plugin path includes the folder we mounted (do NOT remove /usr/share/java)
       PLUGIN_PATH: "/usr/share/java,/usr/share/confluent-hub-components"
-    ports:
-      - "8083:8083"
-    # optional: mount plugins if needed (uncomment and adjust)
-    # volumes:
-    #   - ./pipeline/connect-plugins:/usr/share/confluent-hub-components:rw
 
   mongodb:
     image: mongo:6.0
@@ -98,6 +92,7 @@ services:
     volumes:
       - mongo-data:/data/db
 
+  # Lightweight UI for KSQL
   ksqldb-ui:
     image: deniskrumko/ksqldb-ui:latest
     restart: unless-stopped
