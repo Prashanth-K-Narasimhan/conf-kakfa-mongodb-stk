@@ -1,17 +1,17 @@
--- 01_create_raw_stream.ksql
--- Reads raw input messages exactly as defined. "I already know the schema of this topic, and I just want ksqlDB to read it."
-
-CREATE STREAM TELEMETRY_RAW (
-  did VARCHAR,
-  timestamp BIGINT,
-  name VARCHAR,
-  value_type VARCHAR,
-  float_value DOUBLE,
-  string_value VARCHAR,
-  int_value VARCHAR,     -- keep as varchar because producer is inconsistent
-  eventTime VARCHAR,
-  receivedTime VARCHAR
+CREATE STREAM IF NOT EXISTS TELEMETRY_RAW (
+  "did" VARCHAR,
+  "timestamp" BIGINT,
+  "name" VARCHAR,
+  "value_type" VARCHAR,
+  "float_value" DOUBLE,
+  "string_value" VARCHAR,
+  "int_value" VARCHAR,
+  "eventTime" VARCHAR,
+  "receivedTime" VARCHAR
 ) WITH (
   KAFKA_TOPIC = 'telemetry_raw',
   VALUE_FORMAT = 'JSON'
 );
+
+
+-- telemetry_raw example: {"did": "1002", "timestamp": 1763887946774, "name": "ignition_status", "value_type": "1", "string_value": "", "int_value": "0", "eventTime": "2025-11-23T08:52:26.774000+00:00", "receivedTime": "2025-11-23T08:52:26.774000+00:00"}

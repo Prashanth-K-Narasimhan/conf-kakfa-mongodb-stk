@@ -1,26 +1,20 @@
--- 02_create_telemetry_normalized.ksql
--- Normalized stream built on top of TELEMETRY_RAW.
--- Keeps the same fields, renames `name` -> sensor_name, preserves eventTime (string),
--- and injects dbIngestion_time (ROWTIME formatted to ISO).
-CREATE STREAM TELEMETRY_NORMALIZED
-WITH (
-  KAFKA_TOPIC = 'telemetry_normalized',
-  VALUE_FORMAT = 'JSON'
+CREATE STREAM IF NOT EXISTS TELEMETRY_NORMALIZED WITH (
+  KAFKA_TOPIC='telemetry_normalized',
+  VALUE_FORMAT='JSON'
 ) AS
 SELECT
-  did,
-  name                    AS sensor_name,
-  value_type,
-  float_value,
-  string_value,
-  int_value,              -- preserved as VARCHAR
-  eventTime,              -- preserved as original ISO string
-  receivedTime,
-  TIMESTAMPTOSTRING(
-    ROWTIME,
-    'yyyy-MM-dd''T''HH:mm:ss.SSSX',
-    'UTC'
-  ) AS dbIngestion_time
+  "did"                   AS "did",
+  "timestamp"             AS "timestamp",
+  "name"                  AS "sensor_name",
+  "value_type"            AS "value_type",
+  "string_value"          AS "string_value",
+  "int_value"             AS "int_value",
+  CAST("float_value" AS DOUBLE) AS "float_value",
+  "eventTime"             AS "eventTime",
+  "receivedTime"          AS "receivedTime",
+  TIMESTAMPTOSTRING(ROWTIME, 'yyyy-MM-dd''T''HH:mm:ss.SSSXXX', 'UTC') AS "dbIngestion_time"
 FROM TELEMETRY_RAW
-PARTITION BY did
 EMIT CHANGES;
+
+
+-- {"SENSOR_NAME":"soc","VALUE_TYPE":"1","FLOAT_VALUE":null,"STRING_VALUE":"","INT_VALUE":"81","EVENTTIME":"2025-11-23T08:50:19.483000+00:00","RECEIVEDTIME":"2025-11-23T08:50:19.484000+00:00","DBINGESTION_TIME":"2025-11-23T08:50:19.484Z"}

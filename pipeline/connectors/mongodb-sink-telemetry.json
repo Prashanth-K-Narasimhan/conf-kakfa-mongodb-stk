@@ -3,20 +3,25 @@
   "config": {
     "connector.class": "com.mongodb.kafka.connect.MongoSinkConnector",
     "tasks.max": "1",
+
     "topics": "telemetry_normalized",
+
     "connection.uri": "mongodb://mongodb:27017",
     "database": "telemetry_db",
     "collection": "mongo_telemetry_history",
 
-    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
-    "key.converter.schemas.enable": "false",
-
+    "key.converter": "org.apache.kafka.connect.storage.StringConverter",
     "value.converter": "org.apache.kafka.connect.json.JsonConverter",
     "value.converter.schemas.enable": "false",
 
     "writemodel.strategy": "com.mongodb.kafka.connect.sink.writemodel.strategy.InsertOneDefaultStrategy",
 
-    "errors.tolerance": "all",
-    "errors.log.enable": "true"
+    "document.id.strategy": "com.mongodb.kafka.connect.sink.processor.id.strategy.PartialValueStrategy",
+    "document.id.strategy.overwrite.existing": "false",
+    "document.id.strategy.partial.value.projection.list": "did,eventTime",
+    "document.id.strategy.partial.value.projection.type": "AllowList",
+
+    "max.num.retries": "5",
+    "retries.defer.timeout": "750"
   }
 }

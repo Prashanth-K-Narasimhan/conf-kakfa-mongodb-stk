@@ -1,13 +1,7 @@
 """
 Orchestrator helpers for sensible startup ordering and health checks.
-
-Provides:
-- wait_for_kafka_bootstrap
-- ensure_topics_exist
-- wait_for_topic_messages
-- wait_for_ksql_table_materialization
-- wait_for_connectors
-- wait_for_mongo
+This fixed file ensures all methods are inside the Orchestrator class (no indentation mistakes)
+and provides a simple, reliable wait_for_topic_messages implementation.
 """
 
 import time
@@ -17,7 +11,6 @@ import requests
 from kafka.admin import KafkaAdminClient, NewTopic
 from kafka import KafkaConsumer, TopicPartition
 from pymongo import MongoClient
-from pymongo.errors import ServerSelectionTimeoutError
 
 
 logger = logging.getLogger("pipeline.orchestrator")
@@ -40,13 +33,10 @@ class Orchestrator:
         self.mongo_url = mongo_url
         self.check_interval = check_interval
 
-    # ----------------------------------------------------------------------
+    # -----------------------------------------------------------
     # Kafka Health
-    # ----------------------------------------------------------------------
+    # -----------------------------------------------------------
     def wait_for_kafka_bootstrap(self, timeout: int = 60) -> bool:
-        """
-        Wait until Kafka bootstrap responds via AdminClient.
-        """
         logger.info(f"Waiting for Kafka at {self.kafka_bootstrap} (timeout {timeout}s)...")
         start = time.time()
 
@@ -56,7 +46,6 @@ class Orchestrator:
                     bootstrap_servers=self.kafka_bootstrap,
                     request_timeout_ms=5000,
                 )
-                # list_topics() without unsupported timeout argument
                 _ = admin.list_topics()
                 admin.close()
                 logger.info("Kafka bootstrap reachable")
@@ -70,9 +59,9 @@ class Orchestrator:
         logger.error("Kafka bootstrap timed out")
         return False
 
-    # ----------------------------------------------------------------------
+    # -----------------------------------------------------------
     # Topic existence
-    # ----------------------------------------------------------------------
+    # -----------------------------------------------------------
     def ensure_topics_exist(
         self,
         topics: List[str],
@@ -81,9 +70,6 @@ class Orchestrator:
         create_if_missing: bool = True,
         timeout: int = 30,
     ) -> bool:
-        """
-        Ensure that topics exist on the broker.
-        """
         logger.info(f"Ensuring topics exist: {topics}")
 
         try:
@@ -109,11 +95,7 @@ class Orchestrator:
 
                 if create_if_missing:
                     new_topics = [
-                        NewTopic(
-                            name=t,
-                            num_partitions=partitions,
-                            replication_factor=replication_factor,
-                        )
+                        NewTopic(name=t, num_partitions=partitions, replication_factor=replication_factor)
                         for t in missing
                     ]
                     try:
@@ -133,65 +115,65 @@ class Orchestrator:
         logger.error("Topic existence check timed out")
         return False
 
-    # ----------------------------------------------------------------------
-    # Topic message readiness
-    # ----------------------------------------------------------------------
+    # -----------------------------------------------------------
+    # Topic message readiness (simple)
+    # -----------------------------------------------------------
     def wait_for_topic_messages(
         self,
         topic: str,
         min_messages: int = 1,
-        partitions: Optional[List[int]] = None,
         timeout: int = 30,
     ) -> bool:
         """
-        Wait until topic has min_messages available across partitions.
-        Uses end_offsets to check quickly without consuming.
+        Simplest reliable check: return True if the topic has at least `min_messages` messages.
+        The function will wait up to `timeout` seconds for the topic to become visible.
         """
-        logger.info(
-            f"Waiting for at least {min_messages} message(s) on topic {topic} (timeout {timeout}s)"
-        )
+        logger.info(f"Checking if topic '{topic}' has {min_messages}+ messages (timeout {timeout}s)")
         start = time.time()
 
         try:
             consumer = KafkaConsumer(
                 bootstrap_servers=self.kafka_bootstrap,
                 enable_auto_commit=False,
+                auto_offset_reset="earliest",
+                consumer_timeout_ms=2000,
             )
         except Exception as e:
             logger.error(f"KafkaConsumer failed: {e}")
             return False
 
-        while time.time() - start < timeout:
+        try:
+            while time.time() - start < timeout:
+                try:
+                    parts = consumer.partitions_for_topic(topic)
+                    if not parts:
+                        # Topic not visible yet — retry until timeout
+                        time.sleep(0.5)
+                        continue
+
+                    tps = [TopicPartition(topic, p) for p in sorted(parts)]
+                    end_offsets = consumer.end_offsets(tps)
+                    total = sum(end_offsets.values())
+
+                    logger.info(f"Topic '{topic}' message count = {total}")
+                    return total >= min_messages
+
+                except Exception as e:
+                    logger.info(f"Error while checking offsets for '{topic}': {e}")
+                    time.sleep(0.5)
+
+            logger.error(f"Timeout: topic '{topic}' has no messages")
+            return False
+
+        finally:
             try:
-                pf = consumer.partitions_for_topic(topic)
-                if not pf:
-                    logger.info(f"Topic {topic} not visible yet.")
-                    time.sleep(self.check_interval)
-                    continue
+                consumer.close()
+            except Exception:
+                pass
 
-                tps = [TopicPartition(topic, p) for p in sorted(pf)]
-                end_offsets = consumer.end_offsets(tps)
-                total = sum(end_offsets.get(tp, 0) for tp in tps)
-
-                logger.info(f"Topic {topic}: total messages = {total}")
-
-                if total >= min_messages:
-                    consumer.close()
-                    logger.info(f"Topic {topic} has sufficient messages.")
-                    return True
-
-            except Exception as e:
-                logger.info(f"Error checking offsets: {e}")
-
-            time.sleep(self.check_interval)
-
-        consumer.close()
-        logger.error(f"Timeout waiting for messages on topic {topic}")
-        return False
-
-    # ----------------------------------------------------------------------
-    # ksqlDB health + table materialization
-    # ----------------------------------------------------------------------
+    # -----------------------------------------------------------
+    # KSQL REST support
+    # -----------------------------------------------------------
     def ksql_post(self, path: str, payload: dict, timeout: int = 10):
         url = f"{self.ksql_url}/{path.lstrip('/')}"
         headers = {"Content-Type": "application/vnd.ksql.v1+json; charset=utf-8"}
@@ -199,6 +181,9 @@ class Orchestrator:
         resp.raise_for_status()
         return resp.json()
 
+    # -----------------------------------------------------------
+    # ksql table materialization (more correct)
+    # -----------------------------------------------------------
     def wait_for_ksql_table_materialization(
         self,
         table_name: str,
@@ -206,28 +191,28 @@ class Orchestrator:
         timeout: int = 60,
     ) -> bool:
         """
-        Poll DESCRIBE EXTENDED and optionally backing_topic offsets until materialized.
+        A table is considered materialized ONLY when:
+        1. DESCRIBE EXTENDED works, AND
+        2. Backing topic has at least 1 message (if provided)
         """
-        logger.info(
-            f"Waiting for ksqlDB table {table_name} materialization (timeout {timeout}s)"
-        )
+        logger.info(f"Waiting for ksqlDB table {table_name} materialization (timeout {timeout}s)")
         start = time.time()
 
         while time.time() - start < timeout:
             try:
                 payload = {
-                    "ksql": f"DESCRIBE EXTENDED {table_name};",
+                    "ksql": f"DESCRIBE {table_name} EXTENDED;",
                     "streamsProperties": {},
                 }
-                out = self.ksql_post("/ksql", payload, timeout=10)
+                _ = self.ksql_post("/ksql", payload, timeout=10)
 
                 if backing_topic_hint:
                     if self.wait_for_topic_messages(backing_topic_hint, min_messages=1, timeout=10):
-                        logger.info(f"Backing topic {backing_topic_hint} has data.")
+                        logger.info(f"Table {table_name} materialized (backing topic has data)")
                         return True
-
-                logger.info(f"DESCRIBE EXTENDED returned for {table_name}.")
-                return True
+                else:
+                    logger.info(f"DESCRIBE EXTENDED returned for {table_name}")
+                    return True
 
             except Exception as e:
                 logger.info(f"ksqlDB describe not ready: {e}")
@@ -237,9 +222,9 @@ class Orchestrator:
         logger.error(f"Timeout waiting for table {table_name} materialization")
         return False
 
-    # ----------------------------------------------------------------------
+    # -----------------------------------------------------------
     # Connectors
-    # ----------------------------------------------------------------------
+    # -----------------------------------------------------------
     def wait_for_connectors(
         self,
         connect_url: str = "http://connect:8083",
@@ -261,22 +246,24 @@ class Orchestrator:
                 if connectors:
                     missing = [c for c in connectors if c not in installed]
                     if missing:
-                        logger.info(f"Missing connectors: {missing}")
                         time.sleep(self.check_interval)
                         continue
 
-                    # Ensure each connector + tasks are running
+                    # Ensure each connector + task is RUNNING
+                    all_good = True
                     for c in connectors:
                         st = requests.get(f"{connect_url}/connectors/{c}/status", timeout=5).json()
                         cstate = st.get("connector", {}).get("state")
                         tstates = [t.get("state") for t in st.get("tasks", [])]
 
                         if cstate != "RUNNING" or any(t != "RUNNING" for t in tstates):
-                            logger.info(f"Connector {c} not running yet: {cstate}/{tstates}")
+                            all_good = False
                             break
-                    else:
-                        logger.info("All connectors RUNNING.")
+
+                    if all_good:
+                        logger.info("All connectors RUNNING")
                         return True
+
                 else:
                     logger.info("Connect worker reachable")
                     return True
@@ -289,9 +276,9 @@ class Orchestrator:
         logger.error("Timeout waiting for connectors")
         return False
 
-    # ----------------------------------------------------------------------
+    # -----------------------------------------------------------
     # MongoDB readiness
-    # ----------------------------------------------------------------------
+    # -----------------------------------------------------------
     def wait_for_mongo(self, timeout: int = 30) -> bool:
         logger.info(f"Waiting for MongoDB at {self.mongo_url} (timeout {timeout}s)")
         start = time.time()
@@ -311,12 +298,11 @@ class Orchestrator:
 
         logger.error("Timeout waiting for MongoDB")
         return False
-    
-    
-    def ksql_server_url():
-        """
-        Get the ksqlDB server URL from environment or default.
-        """
-        import os
 
-        return os.environ.get("KSQL_URL", "http://localhost:8088") 
+
+# -----------------------------------------------------------
+# Correct global helper
+# -----------------------------------------------------------
+def ksql_server_url():
+    import os
+    return os.environ.get("KSQL_URL", "http://localhost:8088")

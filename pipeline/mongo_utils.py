@@ -30,7 +30,7 @@ def setup_mongo() -> None:
     else:
         log("mongo telemetry_history exists")
     try:
-        db.mongo_telemetry_history.create_index([("DID", 1), ("TIMESTAMP", 1)])
+        db.mongo_telemetry_history.create_index([("did", 1), ("timestamp", 1)])
         log("mongo telemetry_history index ensured")
     except Exception as e:
         log("mongo telemetry_history index non-fatal:", e)
@@ -40,7 +40,7 @@ def setup_mongo() -> None:
     else:
         log("mongo vehicle_latest exists")
     try:
-        db.mongo_vehicle_latest_state.create_index([("DID", 1)], name="idx_vehicle_latest_state_DID", unique=False)
+        db.mongo_vehicle_latest_state.create_index([("did", 1)], name="idx_vehicle_latest_state_DID", unique=False)
         log("mongo vehicle_latest index ensured")
     except Exception as e:
         log("mongo vehicle_latest index non-fatal:", e)

@@ -149,7 +149,7 @@ def apply_ksql_and_sample(args: argparse.Namespace, orchestrator: Orchestrator) 
 
     table_ok = True
     if not args.skip_orch:
-        table_ok = orchestrator.wait_for_ksql_table_materialization("VEHICLE_LATEST_STATE", backing_topic_hint="vehicle.latest.state", timeout=40)
+        table_ok = orchestrator.wait_for_ksql_table_materialization("VEHICLE_LATEST_STATE", backing_topic_hint="vehicle_latest_state ", timeout=40)
     if not table_ok:
         klog("WARNING: vehicle_latest did not materialize within timeout")
 
@@ -179,10 +179,10 @@ def register_connectors_when_ready(args: argparse.Namespace, orchestrator: Orche
         klog("connectors registration skipped by flag")
         return
 
-    if args.skip_orch or orchestrator.wait_for_ksql_table_materialization("VEHICLE_LATEST_STATE", backing_topic_hint="vehicle.latest.state", timeout=15):
+    if args.skip_orch or orchestrator.wait_for_ksql_table_materialization("VEHICLE_LATEST_STATE", backing_topic_hint="vehicle_latest_state ", timeout=15):
         register_connectors(replace=args.replace)
         if not args.skip_orch:
-            orchestrator.wait_for_connectors(connect_url=CONNECT_URL, connectors=["mongo-sink-telemetry-history", "mongo-sink-vehicle-latest"], timeout=20)
+            orchestrator.wait_for_connectors(connect_url=CONNECT_URL, connectors=["mongo-sink-telemetry-history", "mongo-sink-vehicle-latest-state"], timeout=20)
     else:
         klog("Skipping connector registration due to ksql table not ready")
 

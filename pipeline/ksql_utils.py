@@ -2,9 +2,11 @@ import os
 import re
 import requests
 import time
+import json
 from typing import Optional, Tuple
 from pipeline.config import KSQL_URL, KSQ_DIR, KSQL_TABLE_MATERIALIZE_TIMEOUT
 from pipeline.kafka_utils import topic_has_messages, log as klog
+
 
 def log(*parts):
     import time as _t
@@ -115,6 +117,38 @@ def ksql_server_url():
     """
     import os
     return os.environ.get("KSQLDB_URL", "http://localhost:8088")
+
+
+def ksql_stream_sample(limit: int = 5, stream_name: str = "TELEMETRY_RAW") -> None:
+    sql = f"SELECT * FROM {stream_name} EMIT CHANGES LIMIT {limit};"
+    url = KSQL_URL.rstrip("/") + "/query-stream"
+    log("ksql streaming sample SQL:", sql)
+    try:
+        r = requests.post(url, json={"sql": sql}, stream=True, timeout=(5, None))
+    except Exception as e:
+        log("ksql stream request failed:", e)
+        return
+    count = 0
+    try:
+        for raw in r.iter_lines(decode_unicode=True):
+            if not raw:
+                continue
+            try:
+                doc = json.loads(raw)
+            except Exception:
+                continue
+            if isinstance(doc, dict) and "row" in doc:
+                cols = doc["row"].get("columns", [])
+                log(f"ksql stream row: {cols}")
+                count += 1
+                if count >= limit:
+                    break
+    finally:
+        try:
+            r.close()
+        except Exception:
+            pass
+    log("ksql stream sample collected", count, "rows")
 
 if __name__ == "__main__":
     apply_ksql_files()

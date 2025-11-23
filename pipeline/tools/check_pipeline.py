@@ -22,7 +22,7 @@ EXPECTED_TOPICS = ["telemetry_raw", "telemetry_normalized", "vehicle_latest_stat
 EXPECTED_STREAMS = ["TELEMETRY_RAW", "TELEMETRY_NORMALIZED"]  # KSQL returns uppercase names
 EXPECTED_TABLES = ["VEHICLE_LATEST_STATE"]
 EXPECTED_COLLECTIONS = ["telemetry_history", "vehicle_latest"]
-EXPECTED_CONNECTORS = ["mongo-sink-vehicle-latest", "mongo-sink-telemetry-history"]  # adjust to your filenames
+EXPECTED_CONNECTORS = ["mongo-sink-vehicle-lates", "mongo-sink-telemetry-history"]  # adjust to your filenames
 
 def check_kafka_topics():
     try:

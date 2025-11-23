@@ -1,23 +1,29 @@
 {
-  "name": "mongo-sink-vehicle-latest_state",
+  "name": "mongo-sink-vehicle-latest-state",
   "config": {
     "connector.class": "com.mongodb.kafka.connect.MongoSinkConnector",
     "tasks.max": "1",
+
     "topics": "vehicle_latest_state",
+
     "connection.uri": "mongodb://mongodb:27017",
     "database": "telemetry_db",
     "collection": "mongo_vehicle_latest_state",
 
-    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
-    "key.converter.schemas.enable": "false",
-
+    "key.converter": "org.apache.kafka.connect.storage.StringConverter",
     "value.converter": "org.apache.kafka.connect.json.JsonConverter",
     "value.converter.schemas.enable": "false",
 
-    "writemodel.strategy": "com.mongodb.kafka.connect.sink.writemodel.strategy.InsertOneDefaultStrategy",
+    "writemodel.strategy": "com.mongodb.kafka.connect.sink.writemodel.strategy.ReplaceOneDefaultStrategy",
+    "replace.one.strategy.filter": "{\"did\": \"${value.did}\"}",
+    "replace.one.strategy.upsert": "true",
 
-    "errors.tolerance": "all",
-    "errors.log.enable": "true"
+    "document.id.strategy": "com.mongodb.kafka.connect.sink.processor.id.strategy.PartialValueStrategy",
+    "document.id.strategy.overwrite.existing": "true",
+    "document.id.strategy.partial.value.projection.list": "did",
+    "document.id.strategy.partial.value.projection.type": "AllowList",
+
+    "max.num.retries": "5",
+    "retries.defer.timeout": "750"
   }
 }
-

@@ -9,6 +9,7 @@ Place this file as your project entrypoint (replace existing main.py or use it s
 """
 
 import argparse
+import signal
 import threading
 import time
 import os
@@ -18,13 +19,13 @@ from typing import Optional, Tuple
 from pipeline.orchestrator import Orchestrator
 from pipeline.kafka_utils import create_kafka_topics, log as klog
 from pipeline.mongo_utils import setup_mongo, mongo_stats, log as mlog
-from pipeline.ksql_utils import apply_ksql_files, wait_for_table_materialization, ksql_server_url
+from pipeline.ksql_utils import apply_ksql_files, ksql_server_url, ksql_table_exists
 from pipeline.connectors import register_connectors
 
 # single producer module (both standalone and embedded behavior)
 from pipeline.producer import start_producer, background_producer_corrected
 
-from pipeline.sample import ksql_stream_sample
+
 from pipeline.config import (
     PRODUCER_NUM_DEVICES,
     PRODUCER_RATE,
@@ -45,8 +46,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--no-connectors", action="store_true", help="Do not register connectors")
     p.add_argument("--no-mongo-setup", action="store_true", help="Do not run mongo setup")
     p.add_argument("--skip-orch", action="store_true", help="Skip orchestrator checks (fast but brittle)")
-    # Default behavior is one-shot. Use --continuous to run continuously.
-    p.add_argument("--continuous", action="store_true", help="Run the producer continuously (default: run once)")
+    p.add_argument("--producer-once", action="store_true", help="Run the producer in one-shot mode (send single batch) and exit")
+    p.add_argument("--step-mode", action="store_true", help="Pause for user input before each step")
     return p.parse_args()
 
 
@@ -69,7 +70,7 @@ def wait_for_kafka_and_topics(orchestrator: Orchestrator, skip_orch: bool) -> bo
         klog("Kafka not ready - aborting")
         return False
 
-    essential_topics = [PRODUCER_TOPIC]
+    essential_topics = ["telemetry_normalized", "telemetry_raw", "vehicle_latest_state"]
     orchestrator.ensure_topics_exist(essential_topics, partitions=1, replication_factor=1, create_if_missing=True, timeout=30)
     return True
 
@@ -96,7 +97,7 @@ def start_producer_mode(args: argparse.Namespace, orchestrator: Orchestrator) ->
         klog("producer disabled via flag")
         return stop_event, producer_thread, producer_stats, producer_stats_lock
 
-    if not args.continuous:
+    if args.producer_once:
         # one-shot worker: run background_producer_corrected with once=True and capture stats
         one_shot_stats = {"sent": 0}
         one_shot_lock = threading.Lock()
@@ -139,24 +140,24 @@ def start_producer_mode(args: argparse.Namespace, orchestrator: Orchestrator) ->
     return stop_event, producer_thread, producer_stats, producer_stats_lock
 
 
-def apply_ksql_and_sample(args: argparse.Namespace, orchestrator: Orchestrator) -> None:
+def apply_ksql(args: argparse.Namespace, orchestrator: Orchestrator) -> None:
     if args.no_ksql:
         klog("ksql apply skipped by flag")
         return
 
     apply_ksql_files(replace=args.replace)
+    
+    klog("ksql stream / table creation done!")
 
-    table_ok = True
-    if not args.skip_orch:
-        table_ok = orchestrator.wait_for_ksql_table_materialization("VEHICLE_LATEST_STATE", backing_topic_hint="vehicle.latest.state", timeout=40)
-    if not table_ok:
-        klog("WARNING: vehicle_latest did not materialize within timeout")
-
-    klog("sampling TELEMETRY_RAW stream while producer is active")
-    ksql_stream_sample(limit=5, stream_name="TELEMETRY_RAW")
-
-    klog("sampling TELEMETRY_NORMALIZED stream while producer is active")
-    ksql_stream_sample(limit=5, stream_name="TELEMETRY_NORMALIZED")
+        
+        
+def sample_ksql(args: argparse.Namespace, orchestrator: Orchestrator) -> None:
+    if ksql_table_exists("VEHICLE_LATEST_STATE"):
+        table_ok = True
+        if not args.skip_orch:
+            table_ok = orchestrator.wait_for_ksql_table_materialization("VEHICLE_LATEST_STATE", backing_topic_hint="vehicle_latest_state ", timeout=40)
+        if not table_ok:
+            klog("WARNING: vehicle_latest did not materialize within timeout")
 
 
 def stop_producer_and_log(stop_event: Optional[threading.Event], producer_thread: Optional[threading.Thread], producer_stats: Optional[dict], producer_stats_lock: Optional[threading.Lock]) -> None:
@@ -174,44 +175,107 @@ def stop_producer_and_log(stop_event: Optional[threading.Event], producer_thread
 
 
 def register_connectors_when_ready(args: argparse.Namespace, orchestrator: Orchestrator) -> None:
+    # case 1: user disabled connectors entirely
     if args.no_connectors:
         klog("connectors registration skipped by flag")
         return
 
-    if args.skip_orch or orchestrator.wait_for_ksql_table_materialization("VEHICLE_LATEST_STATE", backing_topic_hint="vehicle.latest.state", timeout=15):
-        register_connectors(replace=args.replace)
-        if not args.skip_orch:
-            orchestrator.wait_for_connectors(connect_url=CONNECT_URL, connectors=["mongo-sink-telemetry-history", "mongo-sink-vehicle-latest"], timeout=20)
-    else:
-        klog("Skipping connector registration due to ksql table not ready")
+    klog("registering connectors..")
+    register_connectors(replace=args.replace)
+    return
 
+
+
+def step_pause(args: argparse.Namespace, step_name: str = None) -> None:
+    """
+    Pause for user input only if step-mode is enabled.
+    step_name is used to make the prompt clearer.
+    """
+    if getattr(args, "step_mode", False):
+        prompt = f"[{step_name}] Press Enter to continue..." if step_name else "Press Enter to continue..."
+        try:
+            input(prompt)
+        except (KeyboardInterrupt, EOFError):
+            # User aborted — exit with non-zero
+            print("\nAborted by user.")
+            sys.exit(130)
+    
 
 def main():
     args = parse_args()
+    
+    # Track producer handles (None until created)
+    stop_event = None
+    producer_thread = None
+    producer_stats = None
+    producer_stats_lock = None
+    
+    def handle_interrupt(signum, frame):
+        print("\n Interrupt received! Shutting down gracefully...")
 
-    klog("pipeline create start")
-    create_kafka_topics()
+        # Stop producer thread if it was started
+        if stop_event and producer_thread:
+            try:
+                stop_producer_and_log(stop_event, producer_thread, producer_stats, producer_stats_lock)
+            except Exception as e:
+                print(f"Error stopping producer: {e}")
 
-    orchestrator = build_orchestrator()
+        # Anything else you want to clean up:
+        # e.g., close orchestrator, cleanup mongo, kill connectors etc.
 
-    if not wait_for_kafka_and_topics(orchestrator, args.skip_orch):
-        sys.exit(2)
+        sys.exit(130)  # 130 = standard exit code for SIGINT
 
-    setup_mongo_if_requested(args.no_mongo_setup)
+    # Register interrupt handler
+    signal.signal(signal.SIGINT, handle_interrupt)
+    signal.signal(signal.SIGTERM, handle_interrupt) 
 
-    stop_event, producer_thread, producer_stats, producer_stats_lock = start_producer_mode(args, orchestrator)
+    try:
+        # ---- original flow (kept logs and order) ----
+        klog("pipeline starting...")
 
-    apply_ksql_and_sample(args, orchestrator)
+        step_pause(args, "create_kafka_topics ?")
+        create_kafka_topics()
 
-    # Stop producer gracefully before connector registration
-    stop_producer_and_log(stop_event, producer_thread, producer_stats, producer_stats_lock)
+        orchestrator = build_orchestrator()
 
-    register_connectors_when_ready(args, orchestrator)
+        if not wait_for_kafka_and_topics(orchestrator, args.skip_orch):
+            # Keep the original behavior: exit if waiting failed
+            sys.exit(2)
 
-    raw_count, latest_count = mongo_stats()
-    mlog(f"mongo telemetry_history_count={raw_count}, vehicle_latest_count={latest_count}")
+        step_pause(args, "setup monogoDB collections?")
+        setup_mongo_if_requested(args.no_mongo_setup)
 
-    klog("pipeline create complete")
+
+        step_pause(args, "setup ksql streams and tables ?")
+        apply_ksql(args, orchestrator)
+
+
+        step_pause(args, "Start running producer ?")
+        stop_event, producer_thread, producer_stats, producer_stats_lock = start_producer_mode(args, orchestrator)
+
+
+        step_pause(args, "register mongoDB - Kafka connectors ?")
+        register_connectors_when_ready(args, orchestrator)       
+        
+        step_pause(args, "see if MongoDB has data ?")
+        raw_count, latest_count = mongo_stats()
+        mlog(f"mongo telemetry_history_count={raw_count}, vehicle_latest_count={latest_count}")
+
+
+        # Stop producer gracefully before connector registration
+        step_pause(args, "stop running producer ? (will be stopping the producer on interrupt also.. ) ")
+        stop_producer_and_log(stop_event, producer_thread, producer_stats, producer_stats_lock)
+        
+        
+        klog("pipeline create complete!!")
+        
+    except KeyboardInterrupt:
+        # Fallback in case signal handler didn't catch
+        handle_interrupt(None, None)
+
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+        handle_interrupt(None, None)
 
 
 if __name__ == "__main__":
