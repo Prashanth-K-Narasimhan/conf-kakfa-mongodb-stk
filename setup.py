@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="telemetry_pipeline",
-    version="0.1.0",
+    version="0.0.2",
     description="Modular Kafka-KSQL-MongoDB telemetry pipeline",
     packages=find_packages(include=["pipeline", "pipeline.*"]),
     include_package_data=True,
