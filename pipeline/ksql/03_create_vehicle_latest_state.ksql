@@ -1,0 +1,27 @@
+CREATE TABLE IF NOT EXISTS VEHICLE_LATEST_STATE
+WITH (
+  KAFKA_TOPIC = 'vehicle_latest_state',
+  VALUE_FORMAT = 'JSON'
+) AS
+SELECT
+  "did" AS "did_key",
+  LATEST_BY_OFFSET("did") AS "did",
+  LATEST_BY_OFFSET("eventTime") AS "eventTime",
+  LATEST_BY_OFFSET(
+    CASE WHEN "sensor_name" = 'odometer' THEN "float_value" ELSE NULL END
+  ) AS "odo",
+  LATEST_BY_OFFSET(
+    CASE WHEN "sensor_name" = 'soc' THEN CAST("int_value" AS INTEGER) ELSE NULL END
+  ) AS "soc",
+  LATEST_BY_OFFSET(
+    CASE WHEN "sensor_name" = 'speed' THEN CAST("int_value" AS INTEGER) ELSE NULL END
+  ) AS "speed",
+  LATEST_BY_OFFSET(
+    CASE WHEN "sensor_name" = 'ignition_status' THEN CAST("int_value" AS INTEGER) ELSE NULL END
+  ) AS "ignition",
+  LATEST_BY_OFFSET(
+    TIMESTAMPTOSTRING(ROWTIME, 'yyyy-MM-dd''T''HH:mm:ss.SSSXXX', 'UTC')
+  ) AS "ingestion_time"
+FROM TELEMETRY_NORMALIZED
+GROUP BY "did"
+EMIT CHANGES;

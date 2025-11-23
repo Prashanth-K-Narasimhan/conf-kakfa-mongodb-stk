@@ -32,11 +32,11 @@ MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
 DB_NAME = os.environ.get("DB_NAME", "telemetry_db")
 
 # resources names (change if you used different names)
-TOPICS = ["telemetry", "telemetry_raw", "vehicle_latest"]
-KSQL_STREAMS = ["TELEMETRY_STREAM", "TELEMETRY_RAW"]
-KSQL_TABLES = ["VEHICLE_LATEST"]
-CONNECTOR_NAMES = ["mongo-sink-vehicle-latest", "mongo-sink-telemetry-raw"]
-MONGO_COLLECTIONS = ["telemetry_raw", "vehicle_latest"]
+TOPICS = ["telemetry_raw", "telemetry_normalized", "vehicle_latest_state"]
+KSQL_STREAMS = ["TELEMETRY_NORMALIZED", "TELEMETRY_RAW"]
+KSQL_TABLES = ["VEHICLE_LATEST_STATE"]
+CONNECTOR_NAMES = ["mongo-sink-vehicle-latest-state", "mongo-sink-telemetry-history"]
+MONGO_COLLECTIONS = ["mongo_telemetry_history", "mongo_vehicle_latest_state"]
 
 def ksql_endpoint(path="/ksql"):
     return KSQL_URL.rstrip("/") + path
@@ -98,29 +98,58 @@ def delete_connectors(names, keep=[]):
         except Exception as e:
             print(f"[connect] delete error for {n} -> {e}")
 
-def delete_ksql_objects(remove_streams=False, remove_tables=False, keep=[]):
-    if remove_streams:
-        existing_streams = ksql_show("STREAMS")
-        for s in existing_streams:
-            if s in keep:
-                print(f"[ksql] keep stream {s}")
+def delete_ksql_objects(remove_streams=False, remove_tables=False, keep=None, ordered_names=None):
+    if keep is None:
+        keep = set()
+    else:
+        keep = set(keep)
+
+    streams = set(ksql_show("STREAMS") or [])
+    tables = set(ksql_show("TABLES") or [])
+
+    def _drop(kind, name):
+        try:
+            drop_ksql(kind, name)
+            print(f"[ksql] dropped {kind.lower()} {name}")
+        except Exception as e:
+            print(f"[ksql] error dropping {kind.lower()} {name}:", e)
+
+    if ordered_names:
+        for name in ordered_names:
+            if name in keep:
+                print(f"[ksql] keep {name}")
                 continue
-            try:
-                drop_ksql("STREAM", s)
-                print(f"[ksql] dropped stream {s}")
-            except Exception as e:
-                print("[ksql] error dropping stream", s, e)
-    if remove_tables:
-        existing_tables = ksql_show("TABLES")
-        for t in existing_tables:
-            if t in keep:
-                print(f"[ksql] keep table {t}")
+            is_s = name in streams
+            is_t = name in tables
+            if is_s and remove_streams:
+                _drop("STREAM", name)
+                if is_t and remove_tables:  # if same name exists as table too
+                    _drop("TABLE", name)
                 continue
-            try:
-                drop_ksql("TABLE", t)
-                print(f"[ksql] dropped table {t}")
-            except Exception as e:
-                print("[ksql] error dropping table", t, e)
+            if is_t and remove_tables:
+                _drop("TABLE", name)
+                continue
+            # found but not allowed by flags, or not found at all
+            if is_s and not remove_streams:
+                print(f"[ksql] found stream {name} but remove_streams is False; skipping")
+            elif is_t and not remove_tables:
+                print(f"[ksql] found table {name} but remove_tables is False; skipping")
+            else:
+                print(f"[ksql] {name} not found; skipping")
+    else:
+        if remove_streams:
+            for s in sorted(streams):
+                if s in keep:
+                    print(f"[ksql] keep stream {s}")
+                    continue
+                _drop("STREAM", s)
+        if remove_tables:
+            for t in sorted(tables):
+                if t in keep:
+                    print(f"[ksql] keep table {t}")
+                    continue
+                _drop("TABLE", t)
+
 
 def drop_mongo_collections(coll_names, keep=[]):
     client = MongoClient(MONGO_URL)
@@ -169,7 +198,7 @@ def main():
         upper_keep = [k.upper() for k in keep]
         delete_streams = True
         delete_tables = True
-        delete_ksql_objects(remove_streams=delete_streams, remove_tables=delete_tables, keep=upper_keep)
+        delete_ksql_objects(remove_streams=delete_streams, remove_tables=delete_tables, keep=upper_keep, ordered_names=KSQL_TABLES + KSQL_STREAMS)
 
     if remove_topics:
         delete_kafka_topics(TOPICS, keep=keep)

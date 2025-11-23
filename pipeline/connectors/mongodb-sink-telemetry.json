@@ -1,0 +1,21 @@
+{
+  "name": "mongo-sink-telemetry-history",
+  "config": {
+    "connector.class": "com.mongodb.kafka.connect.MongoSinkConnector",
+    "topics": "telemetry_normalized",
+    "connection.uri": "mongodb://mongodb:27017",
+    "database": "telemetry_db",
+    "collection": "mongo_telemetry_history",
+
+    "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "false",
+
+    "document.id.strategy": "com.mongodb.kafka.connect.sink.processor.id.strategy.PartialValueStrategy",
+    "document.id.strategy.partial.value.projection.list": "did,sensor_name,timestamp",
+    "document.id.strategy.partial.value.projection.type": "AllowList",
+
+    "writemodel.strategy": "com.mongodb.kafka.connect.sink.writemodel.strategy.ReplaceOneBusinessKeyStrategy",
+    "document.id.strategy.overwrite.existing": "true"
+  }
+}

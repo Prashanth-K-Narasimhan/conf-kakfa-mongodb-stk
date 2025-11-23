@@ -1,0 +1,19 @@
+CREATE STREAM IF NOT EXISTS TELEMETRY_NORMALIZED WITH (
+  KAFKA_TOPIC='telemetry_normalized',
+  VALUE_FORMAT='JSON'
+) AS
+SELECT
+  "did"                   AS "did_key",     -- 1. This becomes the Kafka Key (because of PARTITION BY)
+  AS_VALUE("did")         AS "did",         -- 2. AS_VALUE() forces this copy into the JSON Value
+  "timestamp"             AS "timestamp",
+  "name"                  AS "sensor_name",
+  "value_type"            AS "value_type",
+  "string_value"          AS "string_value",
+  "int_value"             AS "int_value",
+  CAST("float_value" AS DOUBLE) AS "float_value",
+  "eventTime"             AS "eventTime",
+  "receivedTime"          AS "receivedTime",
+  TIMESTAMPTOSTRING(ROWTIME, 'yyyy-MM-dd''T''HH:mm:ss.SSSXXX', 'UTC') AS "dbIngestion_time"
+FROM TELEMETRY_RAW
+PARTITION BY "did"
+EMIT CHANGES;

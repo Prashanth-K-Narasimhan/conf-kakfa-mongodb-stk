@@ -1,0 +1,14 @@
+CREATE STREAM IF NOT EXISTS TELEMETRY_RAW (
+  "did" VARCHAR,
+  "timestamp" BIGINT,
+  "name" VARCHAR,
+  "value_type" VARCHAR,
+  "float_value" DOUBLE,
+  "string_value" VARCHAR,
+  "int_value" VARCHAR,
+  "eventTime" VARCHAR,
+  "receivedTime" VARCHAR
+) WITH (
+  KAFKA_TOPIC = 'telemetry_raw',
+  VALUE_FORMAT = 'JSON'
+);

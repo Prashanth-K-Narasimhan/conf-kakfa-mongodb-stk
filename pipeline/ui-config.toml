@@ -1,0 +1,6 @@
+[servers]
+
+  [servers.local]
+  name = "Local ksqlDB"
+  url = "http://ksqldb-server:8088"
+  description = "ksqlDB 0.28.2 development server"
