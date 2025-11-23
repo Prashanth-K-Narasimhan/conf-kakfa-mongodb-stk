@@ -20,7 +20,7 @@ from pipeline.orchestrator import Orchestrator
 from pipeline.kafka_utils import create_kafka_topics, log as klog
 from pipeline.mongo_utils import setup_mongo, mongo_stats, log as mlog
 from pipeline.ksql_utils import apply_ksql_files, ksql_server_url, ksql_table_exists
-from pipeline.connectors import register_connectors
+from pipeline.connectors_utils import register_connectors
 
 # single producer module (both standalone and embedded behavior)
 from pipeline.producer import start_producer, background_producer_corrected
@@ -36,7 +36,6 @@ from pipeline.config import (
     CONNECT_URL,
     MONGO_URL
 )
-
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Telemetry pipeline orchestrator")
@@ -257,10 +256,6 @@ def main():
         step_pause(args, "register mongoDB - Kafka connectors ?")
         register_connectors_when_ready(args, orchestrator)       
         
-        step_pause(args, "see if MongoDB has data ?")
-        raw_count, latest_count = mongo_stats()
-        mlog(f"mongo telemetry_history_count={raw_count}, vehicle_latest_count={latest_count}")
-
 
         # Stop producer gracefully before connector registration
         step_pause(args, "stop running producer ? (will be stopping the producer on interrupt also.. ) ")

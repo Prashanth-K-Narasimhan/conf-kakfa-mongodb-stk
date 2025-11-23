@@ -46,14 +46,3 @@ def setup_mongo() -> None:
         log("mongo vehicle_latest index non-fatal:", e)
     client.close()
 
-def mongo_stats() -> tuple:
-    try:
-        client = MongoClient(MONGO_URL)
-        db = client[DB_NAME]
-        raw_count = db.telemetry_history.estimated_document_count()
-        latest_count = db.vehicle_latest.estimated_document_count()
-        client.close()
-        return raw_count, latest_count
-    except Exception as e:
-        log("mongo stats error:", e)
-        return 0, 0
