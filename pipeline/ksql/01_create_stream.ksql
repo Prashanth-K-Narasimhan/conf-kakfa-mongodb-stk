@@ -12,6 +12,3 @@ CREATE STREAM IF NOT EXISTS TELEMETRY_RAW (
   KAFKA_TOPIC = 'telemetry_raw',
   VALUE_FORMAT = 'JSON'
 );
-
-
--- telemetry_raw example: {"did": "1002", "timestamp": 1763887946774, "name": "ignition_status", "value_type": "1", "string_value": "", "int_value": "0", "eventTime": "2025-11-23T08:52:26.774000+00:00", "receivedTime": "2025-11-23T08:52:26.774000+00:00"}

@@ -4,7 +4,8 @@ WITH (
   VALUE_FORMAT = 'JSON'
 ) AS
 SELECT
-  "did" AS "did",
+  "did" AS "did_key",
+  LATEST_BY_OFFSET("did") AS "did",
   LATEST_BY_OFFSET("eventTime") AS "eventTime",
   LATEST_BY_OFFSET(
     CASE WHEN "sensor_name" = 'odometer' THEN "float_value" ELSE NULL END
@@ -24,6 +25,3 @@ SELECT
 FROM TELEMETRY_NORMALIZED
 GROUP BY "did"
 EMIT CHANGES;
-
-
--- {"EVENTTIME":"2025-11-23T08:51:38.571000+00:00","ODO":120.24,"SOC":50,"SPEED":94,"IGNITION":1,"INGESTION_TIME":"2025-11-23T08:51:38.572Z"}
