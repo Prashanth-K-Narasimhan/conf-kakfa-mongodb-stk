@@ -1,264 +1,308 @@
-# Real-Time Telemetry Streaming Pipeline
-*A practical engineering report built from real debugging, real design choices, and real system behavior*
+# Project: Real-Time Telemetry Streaming Pipeline
 
-## 1. Use Case and Expected Outcome
-The starting point was two raw telemetry JSON samples. Each record represented a single metric emitted by a vehicle device.
+## 1\. Context & Problem Statement
 
-```json
-{
-  "did": "ABC123",
-  "name": "odometer",
-  "float_value": 12345.6,
-  "eventTime": "2024-10-04T11:22:33Z"
-}
-```
+For this exercise, I was given two use case files containing sample telematics data. The data represents how a real EV TCU sends signals like speed, odometer, SoC, and ignition status. Each of these values comes as an independent event, at different timestamps, instead of one combined snapshot.
 
-Odometer arrived alone.  
-SOC arrived alone.  
-Speed, ignition, and everything else arrived in separate events.  
-There was no single event that carried the *state* of the vehicle.
+The requirement was to take this kind of fragmented input and turn it into two usable outputs:
 
-The pipeline needed to produce two parallel outputs:
+1.  **A raw event history**, stored exactly as it is received.
+    
+2.  **A real-time “vehicle state” document** that always reflects the latest values for each signal.
+    
 
-- A **raw history store** where every telemetry event remains preserved exactly as received.
-- A **latest state store** where each `did` has **one continuously updated document** representing the freshest odometer, SOC, speed, ignition, and timestamp.
+The first file shows a simple set of four events and the expected outputs from two consumers. One consumer stores the raw events with ingestion timestamps. The other consumer stores a single merged state with the latest odo, soc, speed and ignition. The second file extends this idea with more events across multiple timestamps, and the final MongoDB output again shows only the most recent combined state for that vehicle.
 
-The objective was to make downstream services *not* reconstruct state manually.  
-The system had to be reproducible, clean, and easy to observe end-to-end.
+So the ask here is to take fragmented input and produce both: an immutable history and an always-updating, consolidated view. The main problem is that TCUs optimise for bandwidth and send signals independently, while downstream systems need a clean, unified picture of the vehicle at any moment. The task is to build a simple streaming pipeline that can stitch these scattered events together and materialize the latest known state.
 
-## 2. Tech Stack
+## 2\. System Architecture
+
 A tightly integrated real-time stack:
 
-- **Apache Kafka** for ingestion and log persistence  
-- **ksqlDB** for real-time parsing and state aggregation  
-- **Kafka Connect** for data movement  
-- **MongoDB** as both the audit store and the state store  
-- **Python** for orchestration, automation, and data generation  
-- **Docker** as the execution environment  
+•             **Apache Kafka** for ingestion and log persistence
 
-The pipeline closely mirrors how real IoT, telematics, and EV platforms operate.
+•             **ksqlDB** for real-time parsing and state aggregation
 
-## 3. Design and Approach
-Telemetry arrives as fragments.  
-The pipeline stitches meaning out of those fragments.
+•             **Kafka Connect** for data movement
 
-### 3.1 Data Flow Overview
-```
-Raw Telemetry → Kafka → ksqlDB Stream → ksqlDB Table → Kafka Topic → MongoDB
-```
+•             **MongoDB** as both the audit store and the state store
 
-### 3.2 Why Docker
-- Identical environment on any machine  
-- No dependency conflicts  
-- Easy teardown and rebuild  
-- Ideal for interview demonstrations  
+•             **Python** for orchestration, automation, and data generation
 
-### 3.3 Stream Definition
-Raw data needed structure before aggregation.
+•             **Docker** as the execution environment
+
+## 3\. Implementation Details
+
+### 3.1 Data Generation
+
+The usual load-testing tools (like Datagen) weren’t enough here because they only produce random values. That doesn’t help when the goal is to test “latest state” logic, where the sequence and behaviour of signals actually matter. To validate the pipeline properly, I needed data that behaved somewhat like a real vehicle.
+
+So I wrote a small custom producer `producer.py` that keeps an internal `DeviceState` object. It simulates a few basic physical behaviours:
+
+- **Inertia:** Speed doesn’t jump from 10 to 80 instantly. It gradually increases or decreases over time.
+    
+- **Battery behaviour:** The SoC drops slowly, depending on speed and whether the ignition is on.
+    
+- **Fragmented emissions:** The producer only sends one metric at a time for each tick, chosen at random. This mirrors how TCUs send signals independently rather than as a combined packet.
+    
+
+This setup gave me realistic, sequential data and allowed me to verify that the “**latest state**” calculation was working correctly.
+
+### 3.2 Flow Diagram
+
+<img src="./usecases/image.png" alt="Untitled diagram-2025-11-23-183607.png" width="537" height="1129" class="jop-noMdConv">
+
+### 3.3 Stream Processing
+
+The main logic sits in ksqlDB, using a simple Stream-to-Table pattern to rebuild the latest vehicle state from the fragmented events.
+
+**Step 1: Normalization**  
+The raw Kafka messages come in with mixed types, so I first created a `TELEMETRY_NORMALIZED` stream. This casts the values into proper numeric types and also re-partitions the data.
+
+- A key design choice here was to explicitly `PARTITION BY "did"`. This makes sure that all events for a given vehicle end up on the same partition, which keeps the ordering intact. Without that, the state updates can become inconsistent.
+
+**Step 2: Aggregation**  
+To build the real-time state, I used a ksqlDB table as a materialized view. This avoids external caches and still gives fast lookups.
 
 ```sql
-CREATE STREAM vehicle_raw (
-  did VARCHAR,
-  name VARCHAR,
-  float_value DOUBLE,
-  int_value BIGINT,
-  string_value VARCHAR,
-  eventTime VARCHAR
-) WITH (KAFKA_TOPIC='vehicle_raw', VALUE_FORMAT='JSON');
-```
-
-### 3.4 Table Definition
-The table merged all events into a unified state.
-
-```sql
-CREATE TABLE vehicle_latest AS
+CREATE TABLE VEHICLE_LATEST_STATE AS
 SELECT
   did,
-  LATEST_BY_OFFSET(CASE WHEN name='odometer' THEN float_value END) AS odo,
-  LATEST_BY_OFFSET(CASE WHEN name='soc' THEN int_value END) AS soc,
-  LATEST_BY_OFFSET(CASE WHEN name='speed' THEN int_value END) AS speed,
-  LATEST_BY_OFFSET(CASE WHEN name='ignition_status' THEN int_value END) AS ignition,
-  LATEST_BY_OFFSET(eventTime) AS eventTime
-FROM vehicle_raw
+  LATEST_BY_OFFSET(CASE WHEN sensor_name='odometer' THEN float_value END) AS odo,
+  LATEST_BY_OFFSET(CASE WHEN sensor_name='soc' THEN int_value END) AS soc,
+  ...
+FROM TELEMETRY_NORMALIZED
 GROUP BY did;
 ```
 
-Each update refined the state of one device.  
-Each metric stayed fresh without overwriting unrelated fields.
+- The idea is straightforward. Whenever a new event arrives, only the corresponding column is updated. For example, if a speed event comes in, only `speed` changes, while `odo` and `soc` keep their previous values. Over time, this table becomes the live, combined state of the vehicle.
 
-## 4. Key Implementation Details
+### 3.4 Storage & Write Strategies
 
-### Explicit Topic Creation
-Avoided auto-create to ensure topic name stability.
+For MongoDB, the pipeline needed to support two different behaviours. One collection had to store every event exactly as it arrived, and the other had to always show the latest state. To keep things clean, I used two separate Kafka Connect sink configurations.
 
-### MongoDB Document ID Strategy
-Absolutely crucial.  
-Mapping DID to `_id` guaranteed proper updates.
+**Use Case A: Immutable History**
 
-```json
-"document.id.strategy": "com.mongodb.kafka.connect.sink.processor.id.strategy.PartialValueStrategy",
-"document.id.strategy.partial.value.projection.list": "did",
-"writemodel.strategy": "com.mongodb.kafka.connect.sink.writemodel.strategy.ReplaceOneBusinessKeyStrategy"
-```
+- The first requirement was to store a full event history. Nothing should ever be overwritten, and duplicate messages from Kafka should not create multiple copies.
+    
+- To handle this, I used `ReplaceOneBusinessKeyStrategy` with a composite key made of `did`, `sensor_name` and `timestamp`. This combination uniquely identifies an event. If Kafka retries a message, MongoDB simply matches it using the same key and updates the existing record, so the collection remains free of duplicates.
+    
+- *Requirement:* Never overwrite data. Idempotency is key.
+    
 
-### Early Data Injection
-ksqlDB tables do not materialize without data.  
-A temporary Python producer ensured the table formed instantly.
+**Use Case B: Latest Vehicle State**
 
-```python
-producer.send("vehicle_raw", sample_event)
-```
+- The second requirement was the opposite. Here, we only care about the most recent state of the vehicle, and we always want to overwrite the document.
+    
+- For this, I used `ReplaceOneDefaultStrategy` along with `PartialValueStrategy` and enabled upserts.
+    
+- *Requirement:* Always overwrite.
+    
+- *Config Code:*
+    
+    ```json
+    "writemodel.strategy": "com.mongodb.kafka.connect.sink.writemodel.strategy.ReplaceOneDefaultStrategy",
+    "replace.one.strategy.filter": "{\"did\": \"${value.did}\"}",
+    "replace.one.strategy.upsert": "true"
+    ```
+    
+- This tells Kafka Connect to update the document for that `did` if it already exists, or create a new one if it doesn’t. As a result, the collection only contains one record per vehicle, and it always reflects the latest combined state.
+    
 
-## 5. Runbook: Starting the Pipeline
+## 4\. Orchestration & Stability Guardrails
 
-### Step 1: Clone the Repo
-```bash
-git clone https://github.com/.../conf-kafka-mongodb-stk
-cd conf-kafka-mongodb-stk
-```
+Docker-based Kafka setups often run into timing issues during startup. Services come up in the wrong order, and then ksqlDB starts querying topics that don’t exist yet, or Kafka Connect tries to write to MongoDB before it is ready.
 
-### Step 2: Build the Connect Image
-```bash
-docker build -t kafka-mongo-connect:latest .
-```
+To avoid these problems, I added a small Python orchestration layer (`main.py`) instead of relying only on `depends_on`.
 
-### Step 3: Launch the Stack
+1.  **Controlled Topic Creation**  
+    In the Docker settings, I disabled Kafka’s auto topic creation (`KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"`). All topics are created ahead of time through `kafka_utils.py`, with the correct partitions and retention settings. This keeps the environment consistent every time it starts.
+    
+2.  **Wait-for-Data Check**  
+    I added a simple `wait_for_data()` function in `orchestrator.py`. The idea is to hold off on registering the Kafka Connect sinks until the producer has actually pushed some data into the topics. This prevents the usual “table not found” or “stream contains no rows” errors that often show up during automated builds or restarts.
+    
+
+## 5\. Deployment Runbook
+
+This runbook outlines the operational procedures for the telemetry streaming pipeline (Kafka → ksqlDB → Kafka Connect → MongoDB). The system is containerized via Docker and orchestrated by a Python entrypoint script.
+
+### 1\. Start the Infrastructure
+
+The stack includes Kafka, Schema Registry, Connect, ksqlDB, and MongoDB.
+
 ```bash
 docker compose up -d
 ```
 
-### Step 4: Initialize Everything
+> **Note:** The first startup may take several minutes as Docker pulls the images.
+
+### 2\. Pipeline Orchestration
+
+Once containers are healthy, use the `python -m pipeline.main` command to initialize the logic.
+
+### Standard Startup
+
 ```bash
-python create_pipeline_full_v3.py
+python -m pipeline.main
 ```
 
-This script handles:
-- Topic creation  
-- KSQL stream and table creation  
-- Temporary event generation  
-- Connector registration  
-- Health checks  
+**This automates:**
 
-### Step 5: Validate the Flow
+- Infrastructure health checks
+- Topic creation (with correct partitioning)
+- ksqlDB migrations (Streams & Tables)
+- Producer startup (Physics simulation)
+- Kafka Connect sink registration
 
-#### ksqlDB
-```sql
-SELECT * FROM vehicle_latest EMIT CHANGES LIMIT 5;
+### Execution Modes
+
+The orchestrator supports specific flags for development and demonstrations.
+
+| Mode | Command | Description |
+| :--- | :--- | :--- |
+| **Replace Mode** | `telemetry_pipeline --replace` | Forces re-registration of Kafka Connect sinks. Use this when you have modified connector JSON configs. |
+| **Demo Mode** | `telemetry_pipeline --demo-mode` | **Recommended for Interviews.** Pauses execution at each major step, allowing you to explain the architecture before proceeding. |
+
+### 3\. Developer Toolbox
+
+These commands are essential for debugging specific components of the stack without restarting the entire pipeline.
+
+### 3.1 Kafka Debugging
+
+**Consume from a topic (Read-only)**  
+Inspect raw or normalized data flowing through the broker.
+
+```bash
+docker run --rm -it --network host confluentinc/cp-kafka:7.4.1 \
+  kafka-console-consumer \
+    --bootstrap-server localhost:29092 \
+    --topic telemetry_raw \
+    --from-beginning --max-messages 10
 ```
 
-#### MongoDB
-```js
-db.vehicle_latest.find().pretty()
-db.raw_events.find().pretty()
+*Common Topics:* `telemetry_raw`, `telemetry_normalized`, `vehicle_latest_state`
+
+**Manually Produce a Message**  
+Inject a specific payload to test edge cases.
+
+```bash
+kafka-console-producer --bootstrap-server localhost:29092 --topic telemetry_raw
 ```
 
-Watching the state update in real time is the moment everything clicks.
+*Paste payload:*
 
-## 6. Troubleshooting (Verbose, Real-world Experience)
-
-### When Kafka Connect Ignored the Mongo Plugin
-Everything looked correct, yet Connect claimed the plugin didn’t exist.  
-The logs revealed the truth:
-
-```
-ClassNotFoundException: com.mongodb...
+```json
+{"did":"1000", "timestamp":1690000000000, "name":"odometer", "float_value":123.45}
 ```
 
-The cause was simple:  
-The JAR was on the host, not inside the container.
+### 3.2 ksqlDB Debugging
 
-Rebuilding the image fixed the entire chain.  
-This moment clarified how Connect isolates plugins and why placement matters.
+**Access the CLI**
 
-### When the ksqlDB Table Stayed Empty
-The schema was fine.  
-The SQL was fine.  
-But the table refused to populate.
-
-The issue was timing.  
-ksqlDB requires real stream data before the table materializes.  
-Once early events were injected before table creation, the table came alive instantly.
-
-### When MongoDB Inserted Instead of Updating
-Without a document ID strategy, MongoDB had no way to decide what to update.  
-It defaulted to inserts.
-
-Using DID as `_id` flipped MongoDB into proper update mode.
-
-### When Networking Broke Everything Silently
-Containers use:
-
-```
-kafka:9092
+```bash
+docker exec -it conf-kakfa-mongodb-stk-ksqldb-server-1 ksql
 ```
 
-Host tools use:
-
-```
-localhost:29092
-```
-
-Mixing these leads to:
-- empty tables  
-- stalled consumers  
-- silent ingestion failures  
-
-Understanding Docker networking removed an entire category of “ghost bugs.”
-
-## 7. Common Errors and Fixes (Explained, Not Listed)
-
-### PowerShell Curl Corrupting JSON
-PowerShell aliases `curl` differently.  
-It silently malformed JSON payloads for connectors.
-
-Switching to:
-
-```
-curl.exe
-```
-
-made connector creation work flawlessly.
-
-### Forgetting Topic Creation
-With auto-create disabled, forgetting to create topics caused silent write failures.  
-Creating topics explicitly resolved everything.
-
-### Table Created Before Data
-Creating the table too early meant it stayed blank forever.  
-Injecting sample events first fixed this consistently.
-
-### Duplicate MongoDB Documents
-Incorrect write strategies led to endless inserts.  
-Choosing the correct ID mapping solved the entire behavior.
-
-## 8. Final Working State
-Once everything aligned, the pipeline behaved like a compact IoT backend:
-
-- `vehicle_raw` captured every telemetry fragment  
-- `vehicle_latest` emitted a clean, merged, always-updated state  
-- MongoDB stored:
-  - full audit history  
-  - one authoritative document per device  
-
-A final verification:
+**Common Queries**
 
 ```sql
-SELECT did, odo, soc, speed, ignition FROM vehicle_latest EMIT CHANGES;
+-- Check the "Digital Twin" state for a specific device
+SELECT * FROM VEHICLE_LATEST_STATE WHERE DID='981';
+
+-- Inspect the live normalized stream
+SELECT * FROM TELEMETRY_NORMALIZED EMIT CHANGES LIMIT 10;
+
+-- Inspect Schema/Topology
+DESCRIBE EXTENDED TELEMETRY_RAW;
+DESCRIBE EXTENDED VEHICLE_LATEST_STATE;
 ```
 
-MongoDB reflected the exact same truth.  
-Everything moved in real time, cleanly and predictably.
+### 3.3 MongoDB Debugging
 
-## 9. Lessons Learned
+**Check History (Audit Trail)**
 
-- Topic discipline prevents unpredictable downstream behavior  
-- ksqlDB tables need early data to form meaningful state  
-- Kafka Connect plugin management is its own skill  
-- Docker networking can silently break ingestion if misunderstood  
-- MongoDB write strategy dictates the entire behavior of state storage  
-- Automation keeps the pipeline consistent and production-friendly  
-- Observing data flow end to end teaches more than theory ever could  
+```bash
+docker exec -it conf-kakfa-mongodb-stk-mongodb-1 \
+  mongosh --eval \
+  "db.getSiblingDB('telemetry_db').mongo_telemetry_history.find().limit(3).pretty()"
+```
 
-This pipeline didn’t just work.  
-It clarified how real-time systems *think*, *flow*, and *fail* — and how to design them with intention.
+**Check Latest State (Digital Twin)**
 
+```bash
+docker exec -it conf-kakfa-mongodb-stk-mongodb-1 \
+  mongosh --eval \
+  "db.getSiblingDB('telemetry_db').mongo_vehicle_latest_state.find().limit(3).pretty()"
+```
+
+### 3.4 Docker Operations
+
+**Rebuild and Restart**
+
+```bash
+# Standard rebuild (uses cache)
+docker compose build
+docker compose up -d
+
+# Clean rebuild (forces fresh install of dependencies)
+docker compose build --no-cache
+docker compose up -d
+```
+
+**Restart a Single Service (e.g., ksqlDB)**
+
+```bash
+docker compose stop ksqldb-server
+docker compose rm -f ksqldb-server
+docker compose up -d ksqldb-server
+```
+
+### 3.5 Python Development
+
+If you need to run the python logic directly without the console script alias:
+
+```bash
+# Standard run
+python -m pipeline.main
+
+# With flags
+python -m pipeline.main --demo-mode
+```
+
+**Reinstall Package**  
+If the console script behaves unexpectedly, force a reinstall:
+
+```bash
+pip install --upgrade --force-reinstall -e .
+```
+
+* * *
+
+## 4\. Best Practices & Notes
+
+- **Development:** Always use editable installs (`pip install -e .`). This ensures changes in your IDE are immediately reflected in the CLI tool.
+- **Git:** Do not push build artifacts (like `*.egg-info/`) to the repository.
+- **Caching:** When changing Dockerfile logic, always use `docker compose build --no-cache` to ensure changes are picked up.
+- **Demos:** The orchestrator handles the complex sequencing of distributed systems. Always use `--demo-mode` during live presentations to ensure a smooth flow.
+
+## 6\. Final Results
+
+The pipeline successfully converts disjointed input streams into a unified state document.
+
+**Input (Fragmented):**  
+`{ "did": "1001", "name": "speed", "value": 45 }` ... (200ms later) ... `{ "did": "1001", "name": "soc", "value": 88 }`
+
+**Output (Unified in MongoDB):**
+
+```json
+{
+    _id: { did: '1000' },
+    ingestion_time: '2025-11-23T16:07:23.151Z',
+    soc: Long('98'),
+    eventTime: '2025-11-23T16:07:23.151000+00:00',
+    odo: 188.52,
+    ignition: Long('1'),
+    did: '1000',
+    speed: Long('53')
+    }
+```
